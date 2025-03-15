@@ -1,0 +1,9 @@
+{
+	"url": "https://seu-site.com/wp-json/raspberry/v1/upload",
+	"key": "sua_chave_api_aqui",
+	"verbose": true,
+	"monitor_directory": "/home/pi/uploads",
+	"check_interval": 60,
+	"extensions": [".jpg", ".png", ".pdf", ".mp4"],
+	"move_to": "/home/pi/uploaded"
+}
