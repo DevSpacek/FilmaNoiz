@@ -1,8 +1,14 @@
-# FilmaNois Plugin
+# FilmaNois Plugins
 
-Este é um plugin para WordPress que permite o upload de arquivos do Raspberry Pi para a biblioteca de mídia do WordPress.
+Este projeto contém vários plugins para WordPress que permitem diferentes funcionalidades relacionadas ao upload e gerenciamento de arquivos do Raspberry Pi.
 
-## Funcionalidades
+## Plugins Disponíveis
+
+### RPi Uploader
+
+Este plugin permite o upload de arquivos do Raspberry Pi para a biblioteca de mídia do WordPress.
+
+#### Funcionalidades
 
 - Adicionar uma página de configurações no painel administrativo do WordPress.
 - Configurar a chave API para autenticação.
@@ -10,21 +16,21 @@ Este é um plugin para WordPress que permite o upload de arquivos do Raspberry P
 - Validar tipos MIME dos arquivos enviados.
 - Habilitar e visualizar logs de upload.
 
-## Instalação
+#### Instalação
 
 1. Faça o download do plugin.
 2. Extraia o conteúdo do arquivo zip na pasta `wp-content/plugins` do seu WordPress.
 3. Ative o plugin através do menu "Plugins" no WordPress.
 
-## Configuração
+#### Configuração
 
 1. Vá para "Configurações" > "RPi Uploader" no painel administrativo do WordPress.
 2. Configure a chave API, opções de mídia, validação MIME e logs conforme necessário.
 3. Use os endpoints fornecidos para realizar uploads a partir do Raspberry Pi.
 
-## Uso
+#### Uso
 
-### Exemplo de uso com Python no Raspberry Pi
+##### Exemplo de uso com Python no Raspberry Pi
 
 ```python
 import requests
@@ -44,7 +50,7 @@ response = requests.post(api_url, headers=headers, files=files)
 print(response.json())
 ```
 
-## Logs
+#### Logs
 
 Se a opção de logs estiver habilitada, você poderá visualizar os logs de upload na página de configurações do plugin. Também é possível limpar os logs através do botão "Limpar Logs".
 
