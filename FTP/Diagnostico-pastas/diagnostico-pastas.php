@@ -168,7 +168,7 @@ function diagnostico_pastas_page() {
                 <li><strong>Permissões</strong>: O usuário do servidor web (provavelmente www-data ou similar) precisa ter permissão de escrita no diretório</li>
                 <li><strong>Restrições da hospedagem</strong>: Algumas hospedagens limitam onde você pode criar arquivos. Use um caminho dentro de wp-content/uploads/</li>
                 <li><strong>Use caminhos relativos</strong>: Em vez de especificar um caminho absoluto como /var/www/..., use um caminho relativo à instalação do WordPress</li>
-                <li><strong>Atualização do cliente sFTP</strong>: Às vezes, o cliente sFTP não mostra novas pastas imediatamente. Tente desconectar e reconectar, ou usar o recurso "atualizar"</li>
+                <li><strong>Atualização do cliente FTP</strong>: Às vezes, o cliente FTP não mostra novas pastas imediatamente. Tente desconectar e reconectar, ou usar o recurso "atualizar"</li>
             </ol>
         </div>
     </div>
