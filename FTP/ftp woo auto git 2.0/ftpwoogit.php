@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: FTP to WooCommerce - Ultra Reliable Auto
+ * Plugin Name: FTP para WooCommerce - Ultra Reliable Auto
  * Description: Converte arquivos FTP em produtos WooCommerce com automação ultra confiável
  * Version: 2.0
  * Author: DevSpacek
@@ -690,6 +690,7 @@ class FTP_To_Woo_Ultra {
      * Processar scan manual
      */
     public function process_manual_scan() {
+        // MODIFICADO: Corrigir o problema de scan manual
         check_admin_referer('scan_ftp_folders_nonce');
         
         if (!current_user_can('manage_options')) {
@@ -712,34 +713,46 @@ class FTP_To_Woo_Ultra {
         }
         
         // Verificar conexão FTP
-        if (!$this->connect_to_ftp()) {
+        try {
+            if (!$this->connect_to_ftp()) {
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'ftp_connect'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            // Iniciar processamento
+            $result = $this->scan_ftp_directories(false);
+            
+            // Fechar conexão FTP
+            $this->close_ftp();
+            
+            // Atualizar hora do último processamento
+            update_option('ftp_last_process_time', time());
+            
+            // Adicionar resultado final ao log
+            $this->add_log("Processamento manual concluído. Total: $result produtos criados");
+            $this->save_activity_log();
+            
+            // Redirecionar com resultado
+            wp_redirect(add_query_arg(array(
+                'page' => 'ftp-to-woo-auto',
+                'processed' => $result
+            ), admin_url('admin.php')));
+            exit;
+            
+        } catch (Exception $e) {
+            // Capturar e registrar qualquer erro
+            $this->add_log("EXCEÇÃO: " . $e->getMessage());
             $this->save_activity_log();
             wp_redirect(add_query_arg(array(
                 'page' => 'ftp-to-woo-auto',
-                'error' => 'ftp_connect'
+                'error' => 'exception'
             ), admin_url('admin.php')));
             exit;
         }
-        
-        // Iniciar processamento
-        $result = $this->scan_ftp_directories(false);
-        
-        // Fechar conexão FTP
-        $this->close_ftp();
-        
-        // Atualizar hora do último processamento
-        update_option('ftp_last_process_time', time());
-        
-        // Adicionar resultado final ao log
-        $this->add_log("Processamento manual concluído. Total: $result produtos criados");
-        $this->save_activity_log();
-        
-        // Redirecionar com resultado
-        wp_redirect(add_query_arg(array(
-            'page' => 'ftp-to-woo-auto',
-            'processed' => $result
-        ), admin_url('admin.php')));
-        exit;
     }
     
     /**
@@ -818,65 +831,66 @@ class FTP_To_Woo_Ultra {
         // Obter diretório base
         $base_dir = get_option('ftp_server_path', '/');
         
-        // Tentar mudar para o diretório base
-        if (!@ftp_chdir($this->ftp_connection, $base_dir)) {
-            $this->add_log("ERRO: Não foi possível acessar o diretório base: {$base_dir}");
-            return 0;
-        }
-        
-        // Listar pastas de clientes
-        $this->add_log("Listando diretórios em: {$base_dir}");
-        $client_folders = @ftp_nlist($this->ftp_connection, ".");
-        
-        if (!is_array($client_folders)) {
-            $this->add_log("ERRO: Falha ao listar diretórios de clientes.");
-            return 0;
-        }
-        
-        // Filtrar apenas diretórios
-        $client_folders = array_filter($client_folders, function($item) {
-            // Ignorar entradas . e ..
-            if ($item == "." || $item == "..") {
-                return false;
+        try {
+            // Tentar mudar para o diretório base
+            if (!@ftp_chdir($this->ftp_connection, $base_dir)) {
+                $this->add_log("ERRO: Não foi possível acessar o diretório base: {$base_dir}");
+                return 0;
             }
             
-            // Verificar se é um diretório (isso requer verificação adicional no FTP)
-            $current_dir = @ftp_pwd($this->ftp_connection);
-            $is_dir = false;
+            // Listar pastas de clientes
+            $this->add_log("Listando diretórios em: {$base_dir}");
+            $client_folders = @ftp_nlist($this->ftp_connection, ".");
             
-            // Tentar mudar para o item para ver se é um diretório
-            if (@ftp_chdir($this->ftp_connection, $item)) {
-                $is_dir = true;
-                // Voltar ao diretório original
-                @ftp_chdir($this->ftp_connection, $current_dir);
+            if (!is_array($client_folders)) {
+                $this->add_log("ERRO: Falha ao listar diretórios de clientes.");
+                return 0;
             }
             
-            return $is_dir;
-        });
-        
-        $this->add_log("Encontradas " . count($client_folders) . " pastas de cliente");
-        
-        foreach ($client_folders as $client_folder) {
-            $client_name = basename($client_folder);
-            $this->add_log("Processando cliente: $client_name");
-            
-            // Verificar se a pasta do cliente é acessível
-            if (!@ftp_chdir($this->ftp_connection, $client_folder)) {
-                $this->add_log("AVISO: Pasta do cliente não pode ser acessada: $client_name");
-                continue;
+            // Filtrar apenas diretórios
+            $valid_folders = [];
+            foreach ($client_folders as $item) {
+                // Ignorar entradas . e ..
+                if ($item == "." || $item == "..") {
+                    continue;
+                }
+                
+                // Verificar se é um diretório
+                $current_dir = @ftp_pwd($this->ftp_connection);
+                if (@ftp_chdir($this->ftp_connection, $item)) {
+                    $valid_folders[] = $item;
+                    // Voltar ao diretório original
+                    @ftp_chdir($this->ftp_connection, $current_dir);
+                }
             }
             
-            $client_processed = $this->process_ftp_client_folder($client_folder, $client_name, $auto_mode);
-            $processed += $client_processed;
+            $this->add_log("Encontradas " . count($valid_folders) . " pastas de cliente");
             
-            // Voltar ao diretório base
-            @ftp_chdir($this->ftp_connection, $base_dir);
-            
-            if ($client_processed > 0) {
-                $this->add_log("Cliente $client_name: $client_processed arquivos processados");
-            } else {
-                $this->add_log("Cliente $client_name: nenhum arquivo novo encontrado");
+            foreach ($valid_folders as $client_folder) {
+                $client_name = basename($client_folder);
+                $this->add_log("Processando cliente: $client_name");
+                
+                // Verificar se a pasta do cliente é acessível
+                if (!@ftp_chdir($this->ftp_connection, $client_folder)) {
+                    $this->add_log("AVISO: Pasta do cliente não pode ser acessada: $client_name");
+                    continue;
+                }
+                
+                $client_processed = $this->process_ftp_client_folder($client_folder, $client_name, $auto_mode);
+                $processed += $client_processed;
+                
+                // Voltar ao diretório base
+                @ftp_chdir($this->ftp_connection, $base_dir);
+                
+                if ($client_processed > 0) {
+                    $this->add_log("Cliente $client_name: $client_processed arquivos processados");
+                } else {
+                    $this->add_log("Cliente $client_name: nenhum arquivo novo encontrado");
+                }
             }
+            
+        } catch (Exception $e) {
+            $this->add_log("EXCEÇÃO: " . $e->getMessage());
         }
         
         return $processed;
