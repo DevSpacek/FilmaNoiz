@@ -1,0 +1,66 @@
+/**
+ * Estilos para a interface administrativa
+ */
+
+.ftp-sync-dashboard {
+	display: flex;
+	flex-wrap: wrap;
+	margin: 20px -10px;
+}
+
+.ftp-sync-section {
+	flex: 1;
+	min-width: 300px;
+	padding: 0 10px;
+	margin-bottom: 20px;
+}
+
+.ftp-sync-panel {
+	background: #fff;
+	border: 1px solid #ccd0d4;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+	margin-bottom: 20px;
+	padding: 15px;
+}
+
+.ftp-sync-panel h3 {
+	margin-top: 0;
+	padding-bottom: 10px;
+	border-bottom: 1px solid #eee;
+}
+
+.ftp-sync-result {
+	margin-top: 10px;
+	padding: 10px;
+	border-left: 4px solid #0073aa;
+	background: #f8f8f8;
+	display: none;
+}
+
+.ftp-sync-result.error {
+	border-left-color: #dc3232;
+}
+
+.ftp-sync-log-viewer {
+	background: #f8f8f8;
+	border: 1px solid #e5e5e5;
+	max-height: 500px;
+	overflow: auto;
+}
+
+.ftp-sync-log-viewer pre {
+	padding: 10px;
+	margin: 0;
+	white-space: pre-wrap;
+	font-family: monospace;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.ftp-sync-intro {
+	margin: 20px 0;
+	padding: 15px;
+	background: #fff;
+	border-left: 4px solid #0073aa;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}

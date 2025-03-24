@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: WooCommerce User Product Restrictions
- * Description: Restringe o acesso aos produtos por usuário, com integração SFTP
+ * Description: Restringe o acesso aos produtos por usuário, com integração FTP
  * Version: 1.0.1
  * Author: DevSpacek
  * Requires at least: 5.8
@@ -62,7 +62,7 @@ class WC_User_Product_Restrictions {
         register_setting('wc_user_product_restrictions', 'wc_upr_use_jet_engine', array(
             'default' => 'no'
         ));
-        register_setting('wc_user_product_restrictions', 'wc_upr_use_sftp_structure', array(
+        register_setting('wc_user_product_restrictions', 'wc_upr_use_ftp_structure', array(
             'default' => 'yes' 
         ));
         register_setting('wc_user_product_restrictions', 'wc_upr_redirect_url', array(
@@ -83,7 +83,7 @@ class WC_User_Product_Restrictions {
         $enable_restrictions = get_option('wc_upr_enable_restrictions', 'yes');
         $admin_override = get_option('wc_upr_admin_override', 'yes');
         $use_jet_engine = get_option('wc_upr_use_jet_engine', 'no');
-        $use_sftp = get_option('wc_upr_use_sftp_structure', 'yes');
+        $use_ftp = get_option('wc_upr_use_ftp_structure', 'yes');
         $redirect_url = get_option('wc_upr_redirect_url', '');
         
         // Verificar JetEngine
@@ -118,13 +118,13 @@ class WC_User_Product_Restrictions {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row">Usar Estrutura SFTP</th>
+                        <th scope="row">Usar Estrutura FTP</th>
                         <td>
-                            <select name="wc_upr_use_sftp_structure">
-                                <option value="yes" <?php selected($use_sftp, 'yes'); ?>>Sim</option>
-                                <option value="no" <?php selected($use_sftp, 'no'); ?>>Não</option>
+                            <select name="wc_upr_use_ftp_structure">
+                                <option value="yes" <?php selected($use_ftp, 'yes'); ?>>Sim</option>
+                                <option value="no" <?php selected($use_ftp, 'no'); ?>>Não</option>
                             </select>
-                            <p class="description">Usar estrutura de pastas SFTP para definir propriedade de produtos</p>
+                            <p class="description">Usar estrutura de pastas FTP para definir propriedade de produtos</p>
                         </td>
                     </tr>
                     <tr>
@@ -163,10 +163,10 @@ class WC_User_Product_Restrictions {
             <div style="background:#f8f8f8; padding:15px; border:1px solid #ddd;">
                 <h3>Como funciona:</h3>
                 
-                <p><strong>Método 1: Estrutura SFTP</strong></p>
+                <p><strong>Método 1: Estrutura FTP</strong></p>
                 <ul style="list-style-type:disc; margin-left:20px;">
-                    <li>Os produtos importados de pastas SFTP serão automaticamente vinculados ao cliente correspondente</li>
-                    <li>O nome da pasta do cliente no SFTP determinará o usuário que terá acesso</li>
+                    <li>Os produtos importados de pastas FTP serão automaticamente vinculados ao cliente correspondente</li>
+                    <li>O nome da pasta do cliente no FTP determinará o usuário que terá acesso</li>
                 </ul>
                 
                 <p><strong>Método 2: Meta box no produto</strong></p>
@@ -191,18 +191,18 @@ class WC_User_Product_Restrictions {
             </div>
             
             <div style="margin-top:20px;">
-                <h2>Sincronizar usuários com pastas SFTP</h2>
-                <p>Este botão irá criar contas de usuário para todas as pastas SFTP encontradas no sistema:</p>
+                <h2>Sincronizar usuários com pastas FTP</h2>
+                <p>Este botão irá criar contas de usuário para todas as pastas FTP encontradas no sistema:</p>
                 
                 <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                     <input type="hidden" name="action" value="wc_upr_sync_users">
                     <?php wp_nonce_field('wc_upr_sync_users_nonce'); ?>
-                    <?php submit_button('Sincronizar usuários SFTP', 'secondary'); ?>
+                    <?php submit_button('Sincronizar usuários FTP', 'secondary'); ?>
                 </form>
                 
                 <?php if (isset($_GET['synced']) && intval($_GET['synced']) > 0): ?>
                 <div class="notice notice-success inline">
-                    <p><?php echo intval($_GET['synced']); ?> novos usuários foram criados a partir de pastas SFTP.</p>
+                    <p><?php echo intval($_GET['synced']); ?> novos usuários foram criados a partir de pastas FTP.</p>
                 </div>
                 <?php endif; ?>
             </div>
@@ -234,17 +234,17 @@ class WC_User_Product_Restrictions {
             $product_users = array();
         }
         
-        // Verificar se temos um usuário do SFTP
-        $sftp_client = get_post_meta($post->ID, '_sftp_client', true);
+        // Verificar se temos um usuário do FTP
+        $ftp_client = get_post_meta($post->ID, '_ftp_client', true);
         
         wp_nonce_field('wc_upr_product_meta_box', 'wc_upr_product_meta_box_nonce');
         ?>
         <div class="wc-upr-meta-box">
-            <?php if ($sftp_client): ?>
+            <?php if ($ftp_client): ?>
             <p>
-                <strong>Cliente SFTP:</strong> <?php echo esc_html($sftp_client); ?>
+                <strong>Cliente FTP:</strong> <?php echo esc_html($ftp_client); ?>
                 <br>
-                <small>Este produto está vinculado a um cliente SFTP</small>
+                <small>Este produto está vinculado a um cliente FTP</small>
             </p>
             <hr>
             <?php endif; ?>
@@ -316,19 +316,19 @@ class WC_User_Product_Restrictions {
             $public_access = isset($_POST['wc_upr_public_access']) ? 'yes' : 'no';
             update_post_meta($post_id, '_wc_upr_public_access', $public_access);
             
-            // Se este produto foi criado do SFTP, verificar se existe um usuário com o nome do cliente
-            $sftp_client = get_post_meta($post_id, '_sftp_client', true);
-            if ($sftp_client) {
+            // Se este produto foi criado do FTP, verificar se existe um usuário com o nome do cliente
+            $ftp_client = get_post_meta($post_id, '_ftp_client', true);
+            if ($ftp_client) {
                 // Buscar usuário pelo nome ou criar usuário se não existir
-                $this->link_sftp_client_to_user($post_id, $sftp_client);
+                $this->link_ftp_client_to_user($post_id, $ftp_client);
             }
         }
     }
     
     /**
-     * Vincular cliente SFTP a um usuário existente ou novo
+     * Vincular cliente FTP a um usuário existente ou novo
      */
-    private function link_sftp_client_to_user($product_id, $client_name) {
+    private function link_ftp_client_to_user($product_id, $client_name) {
         // Verificar se já existe um usuário com esse nome de login
         $user = get_user_by('login', sanitize_user($client_name, true));
         
@@ -388,15 +388,15 @@ class WC_User_Product_Restrictions {
             return true;
         }
         
-        // Verificar cliente SFTP se a opção estiver ativada
-        if (get_option('wc_upr_use_sftp_structure', 'yes') === 'yes') {
-            $sftp_client = get_post_meta($product_id, '_sftp_client', true);
-            if ($sftp_client && $user_id) {
-                // Verificar se o nome de usuário coincide com o cliente SFTP
+        // Verificar cliente FTP se a opção estiver ativada
+        if (get_option('wc_upr_use_ftp_structure', 'yes') === 'yes') {
+            $ftp_client = get_post_meta($product_id, '_ftp_client', true);
+            if ($ftp_client && $user_id) {
+                // Verificar se o nome de usuário coincide com o cliente FTP
                 $user = get_user_by('id', $user_id);
-                if ($user && ($user->user_login === $sftp_client || 
-                             strpos($user->display_name, $sftp_client) !== false || 
-                             strpos($user->user_email, $sftp_client) !== false)) {
+                if ($user && ($user->user_login === $ftp_client || 
+                             strpos($user->display_name, $ftp_client) !== false || 
+                             strpos($user->user_email, $ftp_client) !== false)) {
                     return true;
                 }
             }
@@ -457,12 +457,12 @@ class WC_User_Product_Restrictions {
                 'compare' => 'LIKE',
             );
             
-            // Cliente SFTP
-            if (get_option('wc_upr_use_sftp_structure', 'yes') === 'yes') {
+            // Cliente FTP
+            if (get_option('wc_upr_use_ftp_structure', 'yes') === 'yes') {
                 $user = get_user_by('id', $user_id);
                 if ($user) {
                     $access_query[] = array(
-                        'key'   => '_sftp_client',
+                        'key'   => '_ftp_client',
                         'value' => $user->user_login,
                     );
                 }
@@ -567,9 +567,9 @@ class WC_User_Product_Restrictions {
     }
     
     /**
-     * Crie um usuário cliente a partir de uma pasta SFTP
+     * Crie um usuário cliente a partir de uma pasta FTP
      */
-    public function create_user_from_sftp_client($client_name) {
+    public function create_user_from_ftp_client($client_name) {
         if (empty($client_name)) {
             return false;
         }
@@ -595,14 +595,14 @@ class WC_User_Product_Restrictions {
         ));
         
         if (is_wp_error($user_id)) {
-            error_log('Erro ao criar usuário para cliente SFTP: ' . $user_id->get_error_message());
+            error_log('Erro ao criar usuário para cliente FTP: ' . $user_id->get_error_message());
             return false;
         }
         
         // Notificar administrador
         $admin_email = get_option('admin_email');
-        $subject = 'Novo usuário criado a partir de cliente SFTP';
-        $message = "Um novo usuário foi criado automaticamente a partir de um cliente SFTP:\n\n";
+        $subject = 'Novo usuário criado a partir de cliente FTP';
+        $message = "Um novo usuário foi criado automaticamente a partir de um cliente FTP:\n\n";
         $message .= "Nome de usuário: $username\n";
         $message .= "Email: $email\n";
         $message .= "Senha: $password\n\n";
@@ -614,15 +614,15 @@ class WC_User_Product_Restrictions {
     }
     
     /**
-     * Sincronizar clientes SFTP com usuários
+     * Sincronizar clientes FTP com usuários
      */
-    public function sync_sftp_clients_to_users() {
-        // Obter todos os clientes SFTP existentes
+    public function sync_ftp_clients_to_users() {
+        // Obter todos os clientes FTP existentes
         global $wpdb;
         
         $clients = $wpdb->get_col(
             "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} 
-             WHERE meta_key = '_sftp_client' AND meta_value != ''"
+             WHERE meta_key = '_ftp_client' AND meta_value != ''"
         );
         
         if (empty($clients)) {
@@ -637,7 +637,7 @@ class WC_User_Product_Restrictions {
             
             if (!$user) {
                 // Criar novo usuário
-                $user_id = $this->create_user_from_sftp_client($client_name);
+                $user_id = $this->create_user_from_ftp_client($client_name);
                 
                 if ($user_id) {
                     $count++;
@@ -645,7 +645,7 @@ class WC_User_Product_Restrictions {
                     // Associar todos os produtos deste cliente ao novo usuário
                     $products = $wpdb->get_col($wpdb->prepare(
                         "SELECT post_id FROM {$wpdb->postmeta} 
-                         WHERE meta_key = '_sftp_client' AND meta_value = %s",
+                         WHERE meta_key = '_ftp_client' AND meta_value = %s",
                         $client_name
                     ));
                     
@@ -678,17 +678,17 @@ function wc_user_product_restrictions_init() {
 }
 add_action('plugins_loaded', 'wc_user_product_restrictions_init');
 
-// Hook para processamento quando um produto é criado via SFTP
+// Hook para processamento quando um produto é criado via FTP
 add_action('woocommerce_new_product', 'wc_upr_check_new_product', 10, 2);
 function wc_upr_check_new_product($product_id, $product) {
-        // Verificar se este produto tem um cliente SFTP associado
-    $client_name = get_post_meta($product_id, '_sftp_client', true);
+        // Verificar se este produto tem um cliente FTP associado
+    $client_name = get_post_meta($product_id, '_ftp_client', true);
     if ($client_name) {
         global $wc_user_product_restrictions;
         
         if (isset($wc_user_product_restrictions)) {
             // Criar usuário ou vincular a um existente
-            $user_id = $wc_user_product_restrictions->create_user_from_sftp_client($client_name);
+            $user_id = $wc_user_product_restrictions->create_user_from_ftp_client($client_name);
             
             if ($user_id) {
                 // Adicionar este usuário à lista de permissões
@@ -706,7 +706,7 @@ function wc_upr_check_new_product($product_id, $product) {
     }
 }
 
-// Ação para sincronização de usuários SFTP
+// Ação para sincronização de usuários FTP
 add_action('admin_post_wc_upr_sync_users', 'wc_upr_sync_users_callback');
 function wc_upr_sync_users_callback() {
     // Verificar permissões
@@ -721,7 +721,7 @@ function wc_upr_sync_users_callback() {
     $count = 0;
     
     if (isset($wc_user_product_restrictions)) {
-        $count = $wc_user_product_restrictions->sync_sftp_clients_to_users();
+        $count = $wc_user_product_restrictions->sync_ftp_clients_to_users();
     }
     
     // Redirecionar de volta com resultado
@@ -796,10 +796,10 @@ function wc_upr_user_products_shortcode($atts) {
         )
     );
     
-    // Se usar estrutura SFTP, incluir produtos com cliente correspondente
-    if (get_option('wc_upr_use_sftp_structure', 'yes') === 'yes') {
+    // Se usar estrutura FTP, incluir produtos com cliente correspondente
+    if (get_option('wc_upr_use_ftp_structure', 'yes') === 'yes') {
         $args['meta_query'][] = array(
-            'key' => '_sftp_client',
+            'key' => '_ftp_client',
             'value' => $current_user->user_login,
         );
     }
@@ -855,8 +855,8 @@ function wc_upr_user_products_widget_callback() {
         return;
     }
     
-    // Obter nome do cliente SFTP se disponível
-    $sftp_client = '';
+    // Obter nome do cliente FTP se disponível
+    $ftp_client = '';
     $user = wp_get_current_user();
     
     // Buscar produtos associados
@@ -872,7 +872,7 @@ function wc_upr_user_products_widget_callback() {
                 'compare' => 'LIKE',
             ),
             array(
-                'key' => '_sftp_client',
+                'key' => '_ftp_client',
                 'value' => $user->user_login,
             )
         )

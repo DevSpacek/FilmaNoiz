@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: FTP para WooCommerce - Ultra Reliable Auto
+ * Plugin Name: FTP para WooCommerce - Ultra Confiável
  * Description: Converte arquivos FTP em produtos WooCommerce com automação ultra confiável
- * Version: 2.0
+ * Version: 1.0.1
  * Author: DevSpacek
  */
 
@@ -34,6 +34,7 @@ class FTP_To_Woo_Ultra {
         add_action('admin_post_scan_ftp_folders', array($this, 'process_manual_scan'));
         add_action('wp_ajax_trigger_ftp_scan', array($this, 'ajax_trigger_scan'));
         add_action('wp_ajax_nopriv_trigger_ftp_scan', array($this, 'ajax_trigger_scan_nopriv'));
+        add_action('wp_ajax_test_ftp_connection', array($this, 'test_ftp_connection_ajax'));
         
         // Métodos múltiplos de automação
         add_action('init', array($this, 'check_direct_access'));
@@ -169,30 +170,29 @@ class FTP_To_Woo_Ultra {
      * Registrar configurações
      */
     public function register_settings() {
-        // FTP Server settings
-        register_setting('ftp_to_woo_settings', 'ftp_server_host');
-        register_setting('ftp_to_woo_settings', 'ftp_server_port', array(
+        // Configurações FTP
+        register_setting('ftp_to_woo_settings', 'ftp_host');
+        register_setting('ftp_to_woo_settings', 'ftp_port', array(
             'default' => '21'
         ));
-        register_setting('ftp_to_woo_settings', 'ftp_server_username');
-        register_setting('ftp_to_woo_settings', 'ftp_server_password');
-        register_setting('ftp_to_woo_settings', 'ftp_server_path', array(
+        register_setting('ftp_to_woo_settings', 'ftp_username');
+        register_setting('ftp_to_woo_settings', 'ftp_password');
+        register_setting('ftp_to_woo_settings', 'ftp_path', array(
             'default' => '/'
         ));
-        register_setting('ftp_to_woo_settings', 'ftp_passive_mode', array(
+        register_setting('ftp_to_woo_settings', 'ftp_passive', array(
             'default' => 'yes'
         ));
-        register_setting('ftp_to_woo_settings', 'ftp_timeout', array(
-            'default' => '90'
-        ));
         
-        // Product settings
-        register_setting('ftp_to_woo_settings', 'ftp_default_price');
+        // Configurações de produto
+        register_setting('ftp_to_woo_settings', 'ftp_default_price', array(
+            'default' => '10'
+        ));
         register_setting('ftp_to_woo_settings', 'ftp_product_status', array(
             'default' => 'publish'
         ));
         
-        // Automation settings
+        // Configurações de automação
         register_setting('ftp_to_woo_settings', 'ftp_auto_enabled', array(
             'default' => 'yes'
         ));
@@ -220,24 +220,43 @@ class FTP_To_Woo_Ultra {
         }
         
         if (isset($_GET['error'])) {
-            $error = $_GET['error'];
+            $error = sanitize_text_field($_GET['error']);
             $message = '';
             
             switch ($error) {
+                case 'woocommerce':
+                    $message = 'WooCommerce não está ativo. Este plugin requer WooCommerce para funcionar.';
+                    break;
+                case 'ftp_extension':
+                    $message = 'A extensão FTP do PHP não está disponível no servidor. Este plugin requer essa extensão.';
+                    break;
+                case 'process_locked':
+                    $message = 'Outro processo já está em execução. Tente novamente em alguns minutos.';
+                    break;
+                case 'ftp_credentials':
+                    $message = 'As credenciais do servidor FTP não estão configuradas. Preencha todos os campos obrigatórios.';
+                    break;
                 case 'ftp_connect':
-                    $message = 'Não foi possível conectar ao servidor FTP. Verifique as configurações.';
+                    $message = 'Falha ao conectar ao servidor FTP. Verifique o endereço e a porta.';
                     break;
                 case 'ftp_login':
-                    $message = 'Falha no login FTP. Verifique usuário e senha.';
+                    $message = 'Falha no login FTP. Verifique o nome de usuário e senha.';
                     break;
-                case 'woocommerce':
-                    $message = 'O WooCommerce não está ativo. Este plugin requer o WooCommerce.';
+                case 'ftp_path':
+                    $message = 'O diretório base no servidor FTP não existe ou não é acessível.';
+                    break;
+                case 'upload_dir':
+                    $message = 'Não foi possível criar ou escrever no diretório de uploads. Verifique as permissões.';
+                    break;
+                case 'exception':
+                    $error_msg = isset($_GET['message']) ? urldecode($_GET['message']) : 'Desconhecido';
+                    $message = "Erro durante a execução: {$error_msg}";
                     break;
                 default:
-                    $message = 'Ocorreu um erro desconhecido.';
+                    $message = 'Ocorreu um erro durante o processamento.';
             }
             
-            echo '<div class="notice notice-error is-dismissible"><p>' . esc_html($message) . '</p></div>';
+            echo '<div class="notice notice-error is-dismissible"><p><strong>FTP para WooCommerce:</strong> ' . $message . '</p></div>';
         }
     }
     
@@ -316,6 +335,11 @@ class FTP_To_Woo_Ultra {
         }
         
         // Criar um novo arquivo de lock
+        $lock_dir = dirname($this->lock_file);
+        if (!file_exists($lock_dir)) {
+            wp_mkdir_p($lock_dir);
+        }
+        
         @file_put_contents($this->lock_file, date('Y-m-d H:i:s'));
         return false; // Processo não está bloqueado
     }
@@ -330,70 +354,6 @@ class FTP_To_Woo_Ultra {
     }
     
     /**
-     * Conectar ao servidor FTP
-     */
-    private function connect_to_ftp() {
-        // Verificar se já existe uma conexão
-        if ($this->ftp_connection !== null) {
-            return true;
-        }
-        
-        // Obter configurações FTP
-        $ftp_host = get_option('ftp_server_host', '');
-        $ftp_port = intval(get_option('ftp_server_port', 21));
-        $ftp_user = get_option('ftp_server_username', '');
-        $ftp_pass = get_option('ftp_server_password', '');
-        $ftp_passive = get_option('ftp_passive_mode', 'yes') === 'yes';
-        $ftp_timeout = intval(get_option('ftp_timeout', 90));
-        
-        if (empty($ftp_host) || empty($ftp_user) || empty($ftp_pass)) {
-            $this->add_log("ERRO: Configurações de FTP incompletas");
-            return false;
-        }
-        
-        $this->add_log("Conectando ao servidor FTP: {$ftp_host}:{$ftp_port}");
-        
-        // Tentar conexão FTP
-        $conn = @ftp_connect($ftp_host, $ftp_port, $ftp_timeout);
-        
-        if (!$conn) {
-            $this->add_log("ERRO: Não foi possível conectar ao servidor FTP");
-            return false;
-        }
-        
-        // Login
-        $login = @ftp_login($conn, $ftp_user, $ftp_pass);
-        
-        if (!$login) {
-            $this->add_log("ERRO: Falha ao autenticar no servidor FTP");
-            ftp_close($conn);
-            return false;
-        }
-        
-        // Configurar modo passivo se necessário
-        if ($ftp_passive) {
-            ftp_pasv($conn, true);
-            $this->add_log("Modo passivo ativado");
-        }
-        
-        $this->ftp_connection = $conn;
-        $this->add_log("Conectado ao servidor FTP com sucesso");
-        
-        return true;
-    }
-    
-    /**
-     * Fechar conexão FTP
-     */
-    private function close_ftp() {
-        if ($this->ftp_connection !== null) {
-            ftp_close($this->ftp_connection);
-            $this->ftp_connection = null;
-            $this->add_log("Conexão FTP encerrada");
-        }
-    }
-    
-    /**
      * Renderizar página de admin
      */
     public function render_admin_page() {
@@ -403,13 +363,12 @@ class FTP_To_Woo_Ultra {
         }
         
         // Obter configurações
-        $ftp_host = get_option('ftp_server_host', '');
-        $ftp_port = get_option('ftp_server_port', '21');
-        $ftp_user = get_option('ftp_server_username', '');
-        $ftp_pass = get_option('ftp_server_password', '');
-        $ftp_path = get_option('ftp_server_path', '/');
-        $ftp_passive = get_option('ftp_passive_mode', 'yes');
-        $ftp_timeout = get_option('ftp_timeout', '90');
+        $ftp_host = get_option('ftp_host', '');
+        $ftp_port = get_option('ftp_port', '21');
+        $ftp_username = get_option('ftp_username', '');
+        $ftp_password = get_option('ftp_password', '');
+        $ftp_path = get_option('ftp_path', '/');
+        $ftp_passive = get_option('ftp_passive', 'yes');
         
         $default_price = get_option('ftp_default_price', '10');
         $product_status = get_option('ftp_product_status', 'publish');
@@ -432,33 +391,18 @@ class FTP_To_Woo_Ultra {
         
         // Verificar status do WooCommerce
         $woo_active = class_exists('WooCommerce');
+        $ftp_available = function_exists('ftp_connect');
         $next_run = wp_next_scheduled('ftp_auto_scan_hook');
-        
-        // Testar conexão FTP se temos configurações
-        $ftp_status = '';
-        if (!empty($ftp_host) && !empty($ftp_user) && !empty($ftp_pass)) {
-            $conn = @ftp_connect($ftp_host, intval($ftp_port), intval($ftp_timeout));
-            if ($conn) {
-                $login = @ftp_login($conn, $ftp_user, $ftp_pass);
-                if ($login) {
-                    $ftp_status = '<span style="color:green;">✓ Conexão bem sucedida</span>';
-                    ftp_close($conn);
-                } else {
-                    $ftp_status = '<span style="color:red;">✗ Falha de autenticação</span>';
-                }
-            } else {
-                $ftp_status = '<span style="color:red;">✗ Falha na conexão</span>';
-            }
-        }
         
         ?>
         <div class="wrap">
             <h1>FTP para WooCommerce (Ultra Confiável)</h1>
             
-            <div class="notice notice-success">
+            <div class="notice notice-info">
                 <p><strong>Status do Sistema:</strong></p>
                 <ul style="list-style:disc;padding-left:20px;">
                     <li>WooCommerce: <?php echo $woo_active ? '<span style="color:green;">✓ Ativo</span>' : '<span style="color:red;">✗ Inativo</span>'; ?></li>
+                    <li>Extensão FTP do PHP: <?php echo $ftp_available ? '<span style="color:green;">✓ Disponível</span>' : '<span style="color:red;">✗ Não disponível</span>'; ?></li>
                     <li>Data atual do servidor: <?php echo date('Y-m-d H:i:s'); ?></li>
                     <li>Último processamento manual: <?php echo get_option('ftp_last_process_time') ? date('d/m/Y H:i:s', get_option('ftp_last_process_time')) : 'Nunca'; ?></li>
                     <li>Último processamento automático: <?php echo get_option('ftp_last_auto_time') ? date('d/m/Y H:i:s', get_option('ftp_last_auto_time')) : 'Nunca'; ?></li>
@@ -466,7 +410,7 @@ class FTP_To_Woo_Ultra {
                 </ul>
             </div>
             
-            <h2>Configurações do Servidor FTP</h2>
+            <h2>Configuração do Servidor FTP</h2>
             <form method="post" action="options.php">
                 <?php settings_fields('ftp_to_woo_settings'); ?>
                 
@@ -474,62 +418,55 @@ class FTP_To_Woo_Ultra {
                     <tr>
                         <th scope="row">Servidor FTP</th>
                         <td>
-                            <input type="text" name="ftp_server_host" value="<?php echo esc_attr($ftp_host); ?>" class="regular-text" placeholder="ftp.example.com" />
-                            <?php if (!empty($ftp_status)) echo '<p>' . $ftp_status . '</p>'; ?>
+                            <input type="text" name="ftp_host" value="<?php echo esc_attr($ftp_host); ?>" class="regular-text" required />
+                            <p class="description">Endereço do servidor FTP (ex: ftp.seudominio.com)</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">Porta FTP</th>
+                        <th scope="row">Porta</th>
                         <td>
-                            <input type="number" name="ftp_server_port" value="<?php echo esc_attr($ftp_port); ?>" class="small-text" min="1" max="65535" />
-                            <p class="description">Padrão: 21</p>
+                            <input type="number" name="ftp_port" value="<?php echo esc_attr($ftp_port); ?>" class="small-text" required />
+                            <p class="description">Porta do servidor FTP (geralmente 21)</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">Usuário FTP</th>
+                        <th scope="row">Usuário</th>
                         <td>
-                            <input type="text" name="ftp_server_username" value="<?php echo esc_attr($ftp_user); ?>" class="regular-text" />
+                            <input type="text" name="ftp_username" value="<?php echo esc_attr($ftp_username); ?>" class="regular-text" required />
+                            <p class="description">Nome de usuário para conexão FTP</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">Senha FTP</th>
+                        <th scope="row">Senha</th>
                         <td>
-                            <input type="password" name="ftp_server_password" value="<?php echo esc_attr($ftp_pass); ?>" class="regular-text" />
+                            <input type="password" name="ftp_password" value="<?php echo esc_attr($ftp_password); ?>" class="regular-text" required />
+                            <p class="description">Senha para conexão FTP</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">Diretório Inicial</th>
+                        <th scope="row">Diretório Base</th>
                         <td>
-                            <input type="text" name="ftp_server_path" value="<?php echo esc_attr($ftp_path); ?>" class="regular-text" placeholder="/" />
-                            <p class="description">Caminho no servidor FTP onde estão as pastas dos clientes</p>
+                            <input type="text" name="ftp_path" value="<?php echo esc_attr($ftp_path); ?>" class="regular-text" />
+                            <p class="description">Caminho base no servidor FTP onde estão os diretórios de clientes (ex: /public_html/clientes)</p>
                         </td>
                     </tr>
-                    
                     <tr>
                         <th scope="row">Modo Passivo</th>
                         <td>
-                            <select name="ftp_passive_mode">
-                                <option value="yes" <?php selected($ftp_passive, 'yes'); ?>>Ativado</option>
-                                <option value="no" <?php selected($ftp_passive, 'no'); ?>>Desativado</option>
+                            <select name="ftp_passive">
+                                <option value="yes" <?php selected($ftp_passive, 'yes'); ?>>Sim</option>
+                                <option value="no" <?php selected($ftp_passive, 'no'); ?>>Não</option>
                             </select>
-                            <p class="description">Recomendado manter ativado para evitar problemas de firewall</p>
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <th scope="row">Timeout (segundos)</th>
-                        <td>
-                            <input type="number" name="ftp_timeout" value="<?php echo esc_attr($ftp_timeout); ?>" class="small-text" min="10" max="600" />
-                            <p class="description">Tempo máximo de espera para operações FTP</p>
+                            <p class="description">Geralmente "Sim" para evitar problemas com firewalls</p>
                         </td>
                     </tr>
                 </table>
                 
-                <h2>Configurações de Produtos</h2>
+                <button type="button" id="ftp-test-connection" class="button button-secondary">Testar Conexão FTP</button>
+                <div id="ftp-test-result" style="padding:10px;margin-top:10px;display:none;"></div>
+                
+                <h2>Configuração de Produtos</h2>
+                
                 <table class="form-table">
                     <tr>
                         <th scope="row">Preço Padrão</th>
@@ -592,12 +529,12 @@ class FTP_To_Woo_Ultra {
             <hr>
             
             <h2>Processamento Manual</h2>
-            <p>Clique no botão abaixo para escanear o servidor FTP e criar produtos para novos arquivos imediatamente:</p>
+            <p>Clique no botão abaixo para escanear as pastas FTP e criar produtos para novos arquivos imediatamente:</p>
             
             <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                 <input type="hidden" name="action" value="scan_ftp_folders">
                 <?php wp_nonce_field('scan_ftp_folders_nonce'); ?>
-                <?php submit_button('Escanear FTP Agora', 'primary', 'submit', false); ?>
+                <?php submit_button('Escanear Pastas Agora', 'primary', 'submit', false); ?>
             </form>
             
             <hr>
@@ -662,35 +599,80 @@ class FTP_To_Woo_Ultra {
             </div>
             <?php endif; ?>
         </div>
-        <?php
         
-        // Se as configurações forem alteradas, reagendar cron se necessário
-        add_action('update_option_ftp_auto_enabled', array($this, 'maybe_reschedule_cron'), 10, 2);
-        add_action('update_option_ftp_auto_frequency', array($this, 'maybe_reschedule_cron'), 10, 2);
+        <script>
+        jQuery(document).ready(function($) {
+            // Testar conexão FTP
+            $('#ftp-test-connection').on('click', function() {
+                var $button = $(this);
+                var $result = $('#ftp-test-result');
+                
+                $button.prop('disabled', true).text('Testando...');
+                $result.hide();
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'test_ftp_connection',
+                        security: '<?php echo wp_create_nonce('ftp-ajax-nonce'); ?>',
+                        host: $('input[name="ftp_host"]').val(),
+                        port: $('input[name="ftp_port"]').val(),
+                        username: $('input[name="ftp_username"]').val(),
+                        password: $('input[name="ftp_password"]').val(),
+                        path: $('input[name="ftp_path"]').val(),
+                        passive: $('select[name="ftp_passive"]').val()
+                    },
+                    success: function(response) {
+                        $button.prop('disabled', false).text('Testar Conexão FTP');
+                        
+                        if (response.success) {
+                            $result.html(response.data).css('background-color', '#dff0d8').css('color', '#3c763d').css('border', '1px solid #d6e9c6').show();
+                        } else {
+                            $result.html(response.data).css('background-color', '#f2dede').css('color', '#a94442').css('border', '1px solid #ebccd1').show();
+                        }
+                    },
+                    error: function() {
+                        $button.prop('disabled', false).text('Testar Conexão FTP');
+                        $result.html('Erro ao processar requisição.').css('background-color', '#f2dede').css('color', '#a94442').css('border', '1px solid #ebccd1').show();
+                    }
+                });
+            });
+        });
+        </script>
+        <?php
     }
     
     /**
-     * Reagendar CRON quando configurações mudarem
+     * Verificar diretório de upload
      */
-    public function maybe_reschedule_cron($old_value, $new_value) {
-        // Remover agendamento existente
-        $timestamp = wp_next_scheduled('ftp_auto_scan_hook');
-        if ($timestamp) {
-            wp_unschedule_event($timestamp, 'ftp_auto_scan_hook');
+    private function check_upload_directory() {
+        $upload_dir = wp_upload_dir();
+        $target_dir = $upload_dir['basedir'] . '/woocommerce_uploads/';
+        
+        if (!file_exists($target_dir)) {
+            $this->add_log("Criando diretório de upload: {$target_dir}");
+            
+            $created = wp_mkdir_p($target_dir);
+            if (!$created) {
+                $this->add_log("ERRO: Não foi possível criar o diretório de upload");
+                return false;
+            }
         }
         
-        // Se automação estiver ativa, agendar novamente
-        if (get_option('ftp_auto_enabled', 'yes') === 'yes') {
-            $frequency = get_option('ftp_auto_frequency', 'minutely');
-            wp_schedule_event(time(), $frequency, 'ftp_auto_scan_hook');
+        if (!is_writable($target_dir)) {
+            $this->add_log("ERRO: Diretório de upload não tem permissão de escrita");
+            return false;
         }
+        
+        $this->add_log("Diretório de upload está OK: {$target_dir}");
+        return true;
     }
-    
+
     /**
      * Processar scan manual
      */
     public function process_manual_scan() {
-        // MODIFICADO: Corrigir o problema de scan manual
         check_admin_referer('scan_ftp_folders_nonce');
         
         if (!current_user_can('manage_options')) {
@@ -712,9 +694,63 @@ class FTP_To_Woo_Ultra {
             exit;
         }
         
-        // Verificar conexão FTP
+        // Verificar extensão FTP
+        if (!function_exists('ftp_connect')) {
+            $this->add_log("ERRO: Extensão FTP do PHP não está disponível");
+            $this->save_activity_log();
+            wp_redirect(add_query_arg(array(
+                'page' => 'ftp-to-woo-auto',
+                'error' => 'ftp_extension'
+            ), admin_url('admin.php')));
+            exit;
+        }
+        
         try {
-            if (!$this->connect_to_ftp()) {
+            // Verificar se já existe um processo rodando
+            if ($this->is_process_locked()) {
+                $this->add_log("AVISO: Outro processo já está em execução");
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'process_locked'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            // Verificar diretório de upload
+            if (!$this->check_upload_directory()) {
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'upload_dir'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            // Configurações FTP
+            $ftp_host = get_option('ftp_host', '');
+            $ftp_port = intval(get_option('ftp_port', 21));
+            $ftp_username = get_option('ftp_username', '');
+            $ftp_password = get_option('ftp_password', '');
+            $ftp_path = get_option('ftp_path', '/');
+            $passive = get_option('ftp_passive', 'yes') === 'yes';
+            
+            if (empty($ftp_host) || empty($ftp_username) || empty($ftp_password)) {
+                $this->add_log("ERRO: Credenciais FTP não configuradas");
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'ftp_credentials'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            $this->add_log("Conectando ao servidor FTP: $ftp_host:$ftp_port");
+            
+            // Tentar conectar
+            $this->ftp_connection = @ftp_connect($ftp_host, $ftp_port, 30);
+            if (!$this->ftp_connection) {
+                $this->add_log("ERRO: Falha ao conectar ao servidor FTP: $ftp_host:$ftp_port");
                 $this->save_activity_log();
                 wp_redirect(add_query_arg(array(
                     'page' => 'ftp-to-woo-auto',
@@ -723,14 +759,51 @@ class FTP_To_Woo_Ultra {
                 exit;
             }
             
+            // Tentar login
+            $login = @ftp_login($this->ftp_connection, $ftp_username, $ftp_password);
+            if (!$login) {
+                $this->add_log("ERRO: Falha no login FTP. Verifique usuário e senha.");
+                @ftp_close($this->ftp_connection);
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'ftp_login'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            // Modo passivo se necessário
+            if ($passive) {
+                @ftp_pasv($this->ftp_connection, true);
+                $this->add_log("Modo passivo FTP ativado");
+            }
+            
+            // Verificar acesso ao diretório base
+            if (!@ftp_chdir($this->ftp_connection, $ftp_path)) {
+                $this->add_log("ERRO: Diretório base não encontrado: $ftp_path");
+                @ftp_close($this->ftp_connection);
+                $this->save_activity_log();
+                wp_redirect(add_query_arg(array(
+                    'page' => 'ftp-to-woo-auto',
+                    'error' => 'ftp_path'
+                ), admin_url('admin.php')));
+                exit;
+            }
+            
+            $this->add_log("Conectado com sucesso ao FTP, iniciando processamento");
+            
             // Iniciar processamento
             $result = $this->scan_ftp_directories(false);
             
             // Fechar conexão FTP
-            $this->close_ftp();
+            @ftp_close($this->ftp_connection);
+            $this->ftp_connection = null;
             
             // Atualizar hora do último processamento
             update_option('ftp_last_process_time', time());
+            
+            // Liberar o lock
+            $this->release_process_lock();
             
             // Adicionar resultado final ao log
             $this->add_log("Processamento manual concluído. Total: $result produtos criados");
@@ -744,12 +817,26 @@ class FTP_To_Woo_Ultra {
             exit;
             
         } catch (Exception $e) {
-            // Capturar e registrar qualquer erro
-            $this->add_log("EXCEÇÃO: " . $e->getMessage());
+            // Capturar qualquer exceção não tratada
+            $this->add_log("ERRO CRÍTICO: " . $e->getMessage() . " em " . $e->getFile() . " na linha " . $e->getLine());
+            
+            // Tentar fechar conexão FTP se estiver aberta
+            if ($this->ftp_connection) {
+                @ftp_close($this->ftp_connection);
+                $this->ftp_connection = null;
+            }
+            
+            // Liberar o lock
+            $this->release_process_lock();
+            
+            // Salvar o log
             $this->save_activity_log();
+            
+            // Redirecionar com erro
             wp_redirect(add_query_arg(array(
                 'page' => 'ftp-to-woo-auto',
-                'error' => 'exception'
+                'error' => 'exception',
+                'message' => urlencode(substr($e->getMessage(), 0, 100))
             ), admin_url('admin.php')));
             exit;
         }
@@ -779,41 +866,211 @@ class FTP_To_Woo_Ultra {
         
         $this->add_log("Iniciando processamento AUTOMÁTICO ({$execution_type}): " . date('d/m/Y H:i:s'));
         
-        // Verificar WooCommerce
-        if (!class_exists('WooCommerce')) {
-            $this->add_log("ERRO: WooCommerce não está ativo - escaneamento automático abortado");
+        try {
+            // Verificar WooCommerce
+            if (!class_exists('WooCommerce')) {
+                $this->add_log("ERRO: WooCommerce não está ativo - escaneamento automático abortado");
+                $this->save_activity_log();
+                $this->release_process_lock();
+                return 0;
+            }
+            
+            // Verificar extensão FTP
+            if (!function_exists('ftp_connect')) {
+                $this->add_log("ERRO: Extensão FTP do PHP não está disponível");
+                $this->save_activity_log();
+                $this->release_process_lock();
+                return 0;
+            }
+            
+            // Verificar diretório de upload
+            if (!$this->check_upload_directory()) {
+                $this->save_activity_log();
+                $this->release_process_lock();
+                return 0;
+            }
+            
+            // Conectar ao FTP
+            if (!$this->connect_to_ftp()) {
+                $this->save_activity_log();
+                $this->release_process_lock();
+                return 0;
+            }
+            
+            // Executar escaneamento
+            $result = $this->scan_ftp_directories(true);
+            
+            // Fechar conexão FTP
+            $this->close_ftp_connection();
+            
+            // Atualizar hora do último processamento automático
+            update_option('ftp_last_auto_time', time());
+            
+            // Adicionar resultado ao log
+            $this->add_log("Processamento automático concluído. Total: $result produtos criados");
+            
+            // Salvar log de atividade
             $this->save_activity_log();
+            
+            // Liberar o lock
             $this->release_process_lock();
+            
+            return $result;
+        } catch (Exception $e) {
+            // Capturar qualquer exceção não tratada
+            $this->add_log("ERRO CRÍTICO: " . $e->getMessage());
+            
+            // Tentar fechar conexão FTP se estiver aberta
+            $this->close_ftp_connection();
+            
+            // Liberar o lock
+            $this->release_process_lock();
+            
+            // Salvar log de atividade
+            $this->save_activity_log();
+            
             return 0;
         }
+    }
+    
+    /**
+     * Testar conexão FTP via AJAX
+     */
+    public function test_ftp_connection_ajax() {
+        check_ajax_referer('ftp-ajax-nonce', 'security');
         
-        // Verificar conexão FTP
-        if (!$this->connect_to_ftp()) {
-            $this->add_log("ERRO: Falha ao conectar ao servidor FTP - escaneamento automático abortado");
-            $this->save_activity_log();
-            $this->release_process_lock();
-            return 0;
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Permissão negada');
+            return;
         }
         
-        // Executar escaneamento
-        $result = $this->scan_ftp_directories(true);
+        $host = isset($_POST['host']) ? sanitize_text_field($_POST['host']) : '';
+        $port = isset($_POST['port']) ? intval($_POST['port']) : 21;
+        $username = isset($_POST['username']) ? sanitize_text_field($_POST['username']) : '';
+        $password = isset($_POST['password']) ? $_POST['password'] : ''; 
+        $path = isset($_POST['path']) ? sanitize_text_field($_POST['path']) : '/';
+        $passive = isset($_POST['passive']) ? ($_POST['passive'] === 'yes') : true;
         
-        // Fechar conexão FTP
-        $this->close_ftp();
+        // Verificar extensão FTP
+        if (!function_exists('ftp_connect')) {
+            wp_send_json_error('Extensão FTP do PHP não está disponível no servidor');
+            return;
+        }
         
-        // Atualizar hora do último processamento automático
-        update_option('ftp_last_auto_time', time());
+        // Tentar conectar
+        $conn = @ftp_connect($host, $port, 10);
+        if (!$conn) {
+            wp_send_json_error("Falha ao conectar ao servidor FTP: $host:$port");
+            return;
+        }
         
-        // Adicionar resultado ao log
-        $this->add_log("Processamento automático concluído. Total: $result produtos criados");
+        // Tentar login
+        $login = @ftp_login($conn, $username, $password);
+        if (!$login) {
+            @ftp_close($conn);
+            wp_send_json_error('Falha na autenticação FTP. Verifique usuário e senha.');
+            return;
+        }
         
-        // Salvar log de atividade
-        $this->save_activity_log();
+        // Configurar modo passivo se necessário
+        if ($passive) {
+            @ftp_pasv($conn, true);
+        }
         
-        // Liberar o lock
-        $this->release_process_lock();
+        // Verificar diretório
+        if (!@ftp_chdir($conn, $path)) {
+            @ftp_close($conn);
+            wp_send_json_error("Diretório não encontrado: $path");
+            return;
+        }
         
-        return $result;
+        // Listar conteúdo
+        $list = @ftp_nlist($conn, ".");
+        $dirs = 0;
+        $files = 0;
+        
+        if (is_array($list)) {
+            $current = @ftp_pwd($conn);
+            
+            foreach ($list as $item) {
+                if ($item === '.' || $item === '..') {
+                    continue;
+                }
+                
+                // Verificar se é diretório
+                if (@ftp_chdir($conn, "$current/$item")) {
+                    $dirs++;
+                    @ftp_chdir($conn, $current);
+                } else {
+                    $files++;
+                }
+            }
+        }
+        
+        @ftp_close($conn);
+        
+        $result = "<strong>Conexão FTP bem sucedida!</strong><br>";
+        $result .= "Diretório: $path<br>";
+        $result .= "Encontrados: $dirs diretórios e $files arquivos";
+        
+        wp_send_json_success($result);
+    }
+    
+    /**
+     * Conectar ao servidor FTP
+     */
+    private function connect_to_ftp() {
+        // Obter configurações FTP
+        $host = get_option('ftp_host', '');
+        $port = intval(get_option('ftp_port', 21));
+        $username = get_option('ftp_username', '');
+        $password = get_option('ftp_password', '');
+        $passive = get_option('ftp_passive', 'yes') === 'yes';
+        
+        $this->add_log("Conectando ao servidor FTP: $host:$port");
+        
+        // Verificar se as credenciais estão configuradas
+        if (empty($host) || empty($username) || empty($password)) {
+            $this->add_log("ERRO: Credenciais FTP não configuradas");
+            return false;
+        }
+        
+        // Tentar conectar
+        $conn = @ftp_connect($host, $port, 30);
+        if (!$conn) {
+            $this->add_log("ERRO: Falha ao conectar ao servidor FTP: $host:$port");
+            return false;
+        }
+        
+        // Tentar login
+        $login = @ftp_login($conn, $username, $password);
+        if (!$login) {
+            $this->add_log("ERRO: Falha no login FTP. Verifique usuário e senha.");
+            @ftp_close($conn);
+            return false;
+        }
+        
+        // Configurar modo passivo se necessário
+        if ($passive) {
+            @ftp_pasv($conn, true);
+        }
+        
+        // Armazenar conexão
+        $this->ftp_connection = $conn;
+        $this->add_log("Conexão FTP estabelecida com sucesso");
+        
+        return true;
+    }
+    
+    /**
+     * Fechar conexão FTP
+     */
+    private function close_ftp_connection() {
+        if ($this->ftp_connection) {
+            @ftp_close($this->ftp_connection);
+            $this->ftp_connection = null;
+            $this->add_log("Conexão FTP fechada");
+        }
     }
     
     /**
@@ -821,108 +1078,98 @@ class FTP_To_Woo_Ultra {
      */
     private function scan_ftp_directories($auto_mode = false) {
         $processed = 0;
+        $base_path = get_option('ftp_path', '/');
         
-        // Verificar conexão FTP
-        if ($this->ftp_connection === null) {
-            $this->add_log("ERRO: Conexão FTP não estabelecida");
+        $this->add_log("Acessando diretório base: $base_path");
+        
+        // Mudar para o diretório base
+        if (!@ftp_chdir($this->ftp_connection, $base_path)) {
+            $this->add_log("ERRO: Não foi possível acessar o diretório base: $base_path");
             return 0;
         }
         
-        // Obter diretório base
-        $base_dir = get_option('ftp_server_path', '/');
+        // Listar diretórios de clientes
+        $list = @ftp_nlist($this->ftp_connection, ".");
+        if (!is_array($list)) {
+            $this->add_log("ERRO: Falha ao listar diretórios. Verifique permissões FTP.");
+            return 0;
+        }
         
-        try {
-            // Tentar mudar para o diretório base
-            if (!@ftp_chdir($this->ftp_connection, $base_dir)) {
-                $this->add_log("ERRO: Não foi possível acessar o diretório base: {$base_dir}");
-                return 0;
+        // Filtrar apenas diretórios (cliente)
+        $client_folders = array();
+        $current_dir = @ftp_pwd($this->ftp_connection);
+        
+        foreach ($list as $item) {
+            // Pular entradas especiais
+            if ($item === '.' || $item === '..') {
+                continue;
             }
             
-            // Listar pastas de clientes
-            $this->add_log("Listando diretórios em: {$base_dir}");
-            $client_folders = @ftp_nlist($this->ftp_connection, ".");
-            
-            if (!is_array($client_folders)) {
-                $this->add_log("ERRO: Falha ao listar diretórios de clientes.");
-                return 0;
+            // Verificar se é um diretório
+            if (@ftp_chdir($this->ftp_connection, "$current_dir/$item")) {
+                $client_folders[] = array(
+                    'name' => $item,
+                    'path' => "$current_dir/$item"
+                );
+                // Voltar para o diretório atual
+                @ftp_chdir($this->ftp_connection, $current_dir);
             }
+        }
+        
+        $this->add_log("Encontradas " . count($client_folders) . " pastas de cliente");
+        
+        foreach ($client_folders as $client_folder) {
+            $client_name = $client_folder['name'];
+            $client_path = $client_folder['path'];
             
-            // Filtrar apenas diretórios
-            $valid_folders = [];
-            foreach ($client_folders as $item) {
-                // Ignorar entradas . e ..
-                if ($item == "." || $item == "..") {
-                    continue;
-                }
-                
-                // Verificar se é um diretório
-                $current_dir = @ftp_pwd($this->ftp_connection);
-                if (@ftp_chdir($this->ftp_connection, $item)) {
-                    $valid_folders[] = $item;
-                    // Voltar ao diretório original
-                    @ftp_chdir($this->ftp_connection, $current_dir);
-                }
+            $this->add_log("Processando cliente: $client_name");
+            
+            $client_processed = $this->process_ftp_client_folder($client_path, $client_name, $auto_mode);
+            $processed += $client_processed;
+            
+            if ($client_processed > 0) {
+                $this->add_log("Cliente $client_name: $client_processed arquivos processados");
+            } else {
+                $this->add_log("Cliente $client_name: nenhum arquivo novo encontrado");
             }
-            
-            $this->add_log("Encontradas " . count($valid_folders) . " pastas de cliente");
-            
-            foreach ($valid_folders as $client_folder) {
-                $client_name = basename($client_folder);
-                $this->add_log("Processando cliente: $client_name");
-                
-                // Verificar se a pasta do cliente é acessível
-                if (!@ftp_chdir($this->ftp_connection, $client_folder)) {
-                    $this->add_log("AVISO: Pasta do cliente não pode ser acessada: $client_name");
-                    continue;
-                }
-                
-                $client_processed = $this->process_ftp_client_folder($client_folder, $client_name, $auto_mode);
-                $processed += $client_processed;
-                
-                // Voltar ao diretório base
-                @ftp_chdir($this->ftp_connection, $base_dir);
-                
-                if ($client_processed > 0) {
-                    $this->add_log("Cliente $client_name: $client_processed arquivos processados");
-                } else {
-                    $this->add_log("Cliente $client_name: nenhum arquivo novo encontrado");
-                }
-            }
-            
-        } catch (Exception $e) {
-            $this->add_log("EXCEÇÃO: " . $e->getMessage());
         }
         
         return $processed;
     }
     
     /**
-     * Processar pasta de cliente no FTP
+     * Processar pasta do cliente via FTP
      */
     private function process_ftp_client_folder($folder_path, $client_name, $auto_mode = false) {
         $processed = 0;
         
-        // Listar arquivos na pasta atual
-        $files = $this->get_all_ftp_files($folder_path);
+        // Acessar diretório do cliente
+        if (!@ftp_chdir($this->ftp_connection, $folder_path)) {
+            $this->add_log("ERRO: Não foi possível acessar a pasta do cliente: $folder_path");
+            return 0;
+        }
         
-        if (empty($files)) {
+        // Obter lista de arquivos
+        $client_files = $this->get_all_ftp_files($folder_path);
+        
+        if (empty($client_files)) {
             $this->add_log("Nenhum arquivo encontrado para o cliente $client_name");
             return 0;
         }
         
-        $this->add_log("Encontrados " . count($files) . " arquivos para o cliente $client_name");
+        $this->add_log("Encontrados " . count($client_files) . " arquivos para o cliente $client_name");
         
         // Lista de arquivos já processados
         $processed_files = get_option('ftp_processed_files', array());
         
-        foreach ($files as $file_info) {
-            $file_path = $file_info['path'];
-            $file_name = $file_info['name'];
-            $file_size = $file_info['size'];
-            $file_time = $file_info['time'];
+        foreach ($client_files as $file) {
+            $file_name = $file['name'];
+            $file_path = $file['path'];
+            $file_size = $file['size'];
+            $file_time = $file['time'];
             
-            // Criar hash único para o arquivo baseado no caminho e data de modificação
-            $file_hash = md5($file_path . $file_time);
+            // Criar hash único para o arquivo
+            $file_hash = md5($file_path . '_' . $file_size . '_' . $file_time);
             
             // Verificar se já processamos este arquivo
             if (isset($processed_files[$file_hash])) {
@@ -933,7 +1180,7 @@ class FTP_To_Woo_Ultra {
             $this->add_log("Criando produto para: $file_name");
             
             // Criar produto para este arquivo
-            $product_id = $this->create_product_for_ftp_file($file_info, $client_name);
+            $product_id = $this->create_product_from_ftp_file($file, $client_name);
             
             if ($product_id) {
                 $this->add_log("SUCESSO: Produto criado com ID: $product_id");
@@ -961,54 +1208,53 @@ class FTP_To_Woo_Ultra {
     }
     
     /**
-     * Obter todos os arquivos FTP, incluindo em subpastas
+     * Obter todos os arquivos via FTP, incluindo em subpastas
      */
-    private function get_all_ftp_files($dir, $relative_path = '') {
+    private function get_all_ftp_files($dir, $current_path = '') {
         $files = array();
-        $current_dir = @ftp_pwd($this->ftp_connection);
+        $current = @ftp_pwd($this->ftp_connection);
         
-        if (empty($relative_path)) {
-            // Estamos no primeiro nível
-            $relative_path = $dir;
+        // Mudar para o diretório
+        if (!empty($current_path)) {
+            if (!@ftp_chdir($this->ftp_connection, $dir)) {
+                $this->add_log("AVISO: Não foi possível acessar o diretório: $dir");
+                return $files;
+            }
         }
         
-        // Listar arquivos e pastas
-        $items = @ftp_nlist($this->ftp_connection, ".");
+        // Listar conteúdo
+        $list = @ftp_nlist($this->ftp_connection, ".");
         
-        if (!is_array($items)) {
-            $this->add_log("AVISO: Não foi possível listar conteúdo do diretório: " . $relative_path);
+        if (!is_array($list)) {
+            $this->add_log("AVISO: Falha ao listar conteúdo do diretório: " . @ftp_pwd($this->ftp_connection));
             return $files;
         }
         
-        foreach ($items as $item) {
-            // Ignorar entradas . e ..
-            if ($item == "." || $item == "..") {
+        foreach ($list as $item) {
+            // Pular entradas especiais
+            if ($item === '.' || $item === '..') {
                 continue;
             }
             
+            $current_dir = @ftp_pwd($this->ftp_connection);
+            $full_path = $current_dir . '/' . $item;
+            
             // Verificar se é um diretório
-            if (@ftp_chdir($this->ftp_connection, $item)) {
-                // É um diretório, buscar arquivos recursivamente
-                $sub_path = $relative_path . '/' . $item;
-                $sub_files = $this->get_all_ftp_files($dir, $sub_path);
-                $files = array_merge($files, $sub_files);
-                
-                // Voltar ao diretório anterior
+            if (@ftp_chdir($this->ftp_connection, $full_path)) {
+                // É um diretório, processar recursivamente
                 @ftp_chdir($this->ftp_connection, $current_dir);
+                $sub_files = $this->get_all_ftp_files($full_path, $full_path);
+                $files = array_merge($files, $sub_files);
             } else {
-                // É um arquivo, obter informações
-                $file_path = $relative_path . '/' . $item;
-                
-                // Obter detalhes do arquivo via MDTM e SIZE comandos
-                $file_time = @ftp_mdtm($this->ftp_connection, $item);
+                // É um arquivo
                 $file_size = @ftp_size($this->ftp_connection, $item);
                 
-                if ($file_size >= 0) { // -1 significa erro
+                if ($file_size > 0) {
                     $files[] = array(
                         'name' => $item,
-                        'path' => $file_path,
+                        'path' => $current_dir . '/' . $item,
                         'size' => $file_size,
-                        'time' => $file_time > 0 ? $file_time : time()
+                        'time' => @ftp_mdtm($this->ftp_connection, $item) ?: time()
                     );
                 }
             }
@@ -1020,19 +1266,19 @@ class FTP_To_Woo_Ultra {
     /**
      * Criar produto WooCommerce para o arquivo FTP
      */
-    private function create_product_for_ftp_file($file_info, $client_name) {
+    private function create_product_from_ftp_file($file, $client_name) {
         // Informações do arquivo
-        $file_name = $file_info['name'];
-        $file_ext = pathinfo($file_name, PATHINFO_EXTENSION);
-        $file_size = size_format($file_info['size']);
+        $file_name = $file['name'];
+        $file_path = $file['path'];
+        $file_size = $file['size'];
         
-        $this->add_log("Processando arquivo: {$file_name} ({$file_size})");
+        $this->add_log("Processando arquivo: {$file_name} (" . size_format($file_size) . ")");
         
         // Gerar título do produto
         $title = $this->generate_product_title($file_name, $client_name);
         
         // Configurações do produto
-        $price = get_option('ftp_default_price', '0');
+        $price = get_option('ftp_default_price', '10');
         $status = get_option('ftp_product_status', 'publish');
         
         // Verificar WooCommerce
@@ -1042,37 +1288,7 @@ class FTP_To_Woo_Ultra {
         }
         
         try {
-            // Garantir que o WC_Data e WC_Product existam
-            if (!class_exists('WC_Data') || !class_exists('WC_Product')) {
-                $this->add_log("ERRO: Classes WC_Data ou WC_Product não disponíveis");
-                return false;
-            }
-            
-            // Criar objeto do produto
-            $product = new WC_Product();
-            $product->set_name($title);
-            
-            // Descrição
-            $description = "Arquivo: {$file_name}\n";
-            $description .= "Tipo: " . strtoupper($file_ext) . "\n";
-            $description .= "Tamanho: {$file_size}\n";
-            $description .= "Cliente: {$client_name}\n";
-            $description .= "Data: " . date('d/m/Y H:i:s');
-            
-            $product->set_description($description);
-            $product->set_short_description("Arquivo {$file_ext} do cliente {$client_name}");
-            
-            // Configurações básicas
-            $product->set_status($status);
-            $product->set_catalog_visibility('visible');
-            $product->set_price($price);
-            $product->set_regular_price($price);
-            
-            // Configurar como virtual e downloadable
-            $product->set_virtual(true);
-            $product->set_downloadable(true);
-            
-            // Preparar download
+            // Baixar o arquivo do servidor FTP
             $upload_dir = wp_upload_dir();
             $target_dir = $upload_dir['basedir'] . '/woocommerce_uploads/';
             
@@ -1090,41 +1306,76 @@ class FTP_To_Woo_Ultra {
             $new_file_name = uniqid($client_name . '_') . '_' . $file_name;
             $target_path = $target_dir . $new_file_name;
             
-            $this->add_log("Baixando arquivo FTP para: {$target_path}");
+            $this->add_log("Baixando arquivo para: {$target_path}");
             
-            // Baixar o arquivo via FTP
-            if (@ftp_get($this->ftp_connection, $target_path, $file_info['name'], FTP_BINARY)) {
-                $this->add_log("Arquivo baixado com sucesso");
-                
-                // URL do arquivo
-                $download_url = $upload_dir['baseurl'] . '/woocommerce_uploads/' . $new_file_name;
-                
-                // Configurar download
-                $download = array(
-                    'id' => md5($target_path),
-                    'name' => $file_name,
-                    'file' => $download_url
-                );
-                
-                $this->add_log("URL do download: {$download_url}");
-                $product->set_downloads(array($download));
-                $product->set_download_limit(-1); // Sem limite
-                $product->set_download_expiry(-1); // Sem expiração
-            } else {
-                $this->add_log("ERRO: Falha ao baixar arquivo via FTP. Verifique permissões.");
+            // Bailar ao diretório correto
+            $dir = dirname($file_path);
+            $basename = basename($file_path);
+            
+            if (!@ftp_chdir($this->ftp_connection, $dir)) {
+                $this->add_log("ERRO: Não foi possível acessar o diretório do arquivo: $dir");
                 return false;
             }
             
-            // Registrar que estamos tentando salvar o produto
-            $this->add_log("Salvando produto no banco de dados...");
-            
-            // Tentativa de resolução de problema de save()
-            global $wpdb;
-            if (!$wpdb->ready) {
-                $this->add_log("AVISO: Conexão com banco de dados não está pronta");
+            // Baixar arquivo
+            if (@ftp_get($this->ftp_connection, $target_path, $basename, FTP_BINARY)) {
+                $this->add_log("Arquivo baixado com sucesso");
+            } else {
+                $this->add_log("ERRO: Falha ao baixar arquivo do FTP");
+                return false;
             }
             
+            // Verificar se o arquivo foi baixado corretamente
+            if (!file_exists($target_path) || filesize($target_path) <= 0) {
+                $this->add_log("ERRO: Arquivo baixado inválido");
+                @unlink($target_path);
+                return false;
+            }
+            
+            // Criar produto
+            $product = new WC_Product();
+            
+            // Título e descrições
+            $product->set_name($title);
+            
+            $file_ext = pathinfo($file_name, PATHINFO_EXTENSION);
+            
+            $description = "Arquivo: {$file_name}\n";
+            $description .= "Tipo: " . strtoupper($file_ext) . "\n";
+            $description .= "Tamanho: " . size_format($file_size) . "\n";
+            $description .= "Cliente: {$client_name}\n";
+            $description .= "Data: " . date('d/m/Y H:i:s');
+            
+            $product->set_description($description);
+            $product->set_short_description("Arquivo {$file_ext} do cliente {$client_name}");
+            
+            // Configurações básicas
+            $product->set_status($status);
+            $product->set_catalog_visibility('visible');
+            $product->set_price($price);
+            $product->set_regular_price($price);
+            
+            // Configurar como virtual e downloadable
+            $product->set_virtual(true);
+            $product->set_downloadable(true);
+            
+            // URL do arquivo
+            $download_url = $upload_dir['baseurl'] . '/woocommerce_uploads/' . $new_file_name;
+            
+            // Configurar download
+            $download = array(
+                'id' => md5($target_path),
+                'name' => $file_name,
+                'file' => $download_url
+            );
+            
+            $this->add_log("URL do download: {$download_url}");
+            $product->set_downloads(array($download));
+            $product->set_download_limit(-1); // Sem limite
+            $product->set_download_expiry(-1); // Sem expiração
+            
             // Salvar produto
+            $this->add_log("Salvando produto no banco de dados...");
             $product_id = $product->save();
             
             if (!$product_id) {
@@ -1133,13 +1384,13 @@ class FTP_To_Woo_Ultra {
             }
             
             // Adicionar metadados extras
-            update_post_meta($product_id, '_ftp_source', $file_info['path']);
+            update_post_meta($product_id, '_ftp_source_path', $file_path);
             update_post_meta($product_id, '_ftp_client', $client_name);
             
             // Verificar se o produto foi criado corretamente
             $saved_product = wc_get_product($product_id);
             if (!$saved_product) {
-                $this->add_log("ERRO: Produto não encontrado após salvar (ID: {$product_id})");
+                                $this->add_log("ERRO: Produto não encontrado após salvar (ID: {$product_id})");
                 return false;
             }
             
@@ -1169,6 +1420,23 @@ class FTP_To_Woo_Ultra {
     }
     
     /**
+     * Reagendar CRON quando configurações mudarem
+     */
+    public function maybe_reschedule_cron($old_value, $new_value) {
+        // Remover agendamento existente
+        $timestamp = wp_next_scheduled('ftp_auto_scan_hook');
+        if ($timestamp) {
+            wp_unschedule_event($timestamp, 'ftp_auto_scan_hook');
+        }
+        
+        // Se automação estiver ativa, agendar novamente
+        if (get_option('ftp_auto_enabled', 'yes') === 'yes') {
+            $frequency = get_option('ftp_auto_frequency', 'minutely');
+            wp_schedule_event(time(), $frequency, 'ftp_auto_scan_hook');
+        }
+    }
+    
+    /**
      * Adicionar entrada ao log
      */
     private function add_log($message) {
@@ -1193,6 +1461,10 @@ class FTP_To_Woo_Ultra {
 // Inicializar plugin
 add_action('plugins_loaded', function() {
     if (class_exists('WooCommerce')) {
-        new FTP_To_Woo_Ultra();
+        global $ftp_to_woo;
+        $ftp_to_woo = new FTP_To_Woo_Ultra();
+        
+        // Registrar AJAX para teste de conexão FTP
+        add_action('wp_ajax_test_ftp_connection', array($ftp_to_woo, 'test_ftp_connection_ajax'));
     }
 });

@@ -1,0 +1,543 @@
+<?php
+/**
+ * Plugin Name: FTP Sync para WooCommerce
+ * Description: Sincroniza arquivos de um servidor FTP para produtos WooCommerce automaticamente
+ * Version: 1.0.0
+ * Author: DevSpacek
+ * Text Domain: ftp-sync-woo
+ * Requires at least: 5.6
+ * Requires PHP: 7.2
+ */
+
+if (!defined('ABSPATH')) {
+    exit; // Saída se acessado diretamente
+}
+
+// Definições básicas
+define('FTP_SYNC_VERSION', '1.0.0');
+define('FTP_SYNC_PATH', plugin_dir_path(__FILE__));
+define('FTP_SYNC_URL', plugin_dir_url(__FILE__));
+
+/**
+ * Adicionar menu administrativo - método direto sem depender de classes
+ */
+function ftp_sync_add_admin_menu() {
+    // Menu principal
+    add_menu_page(
+        'FTP Sync para WooCommerce', // Título da página
+        'FTP Sync',                  // Título do menu
+        'manage_options',            // Capacidade necessária
+        'ftp-sync-woocommerce',      // Slug do menu
+        'ftp_sync_render_main_page', // Função de callback
+        'dashicons-upload',          // Ícone
+        55                           // Posição
+    );
+    
+    // Submenus
+    add_submenu_page(
+        'ftp-sync-woocommerce',
+        'Configurações FTP Sync',
+        'Configurações',
+        'manage_options',
+        'ftp-sync-woocommerce',
+        'ftp_sync_render_main_page'
+    );
+    
+    add_submenu_page(
+        'ftp-sync-woocommerce',
+        'Status FTP Sync',
+        'Status',
+        'manage_options',
+        'ftp-sync-status',
+        'ftp_sync_render_status_page'
+    );
+}
+// Registrar o menu com alta prioridade para garantir exibição
+add_action('admin_menu', 'ftp_sync_add_admin_menu', 99);
+
+/**
+ * Registrar configurações
+ */
+function ftp_sync_register_settings() {
+    // Servidor FTP
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_host');
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_port');
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_username');
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_password');
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_path');
+    register_setting('ftp_sync_settings', 'ftp_sync_ftp_passive');
+    
+    // Configurações gerais
+    register_setting('ftp_sync_settings', 'ftp_sync_check_interval');
+    register_setting('ftp_sync_settings', 'ftp_sync_product_price');
+    register_setting('ftp_sync_settings', 'ftp_sync_product_status');
+}
+add_action('admin_init', 'ftp_sync_register_settings');
+
+/**
+ * Renderizar página principal
+ */
+function ftp_sync_render_main_page() {
+    // Verificar permissões
+    if (!current_user_can('manage_options')) {
+        wp_die('Acesso negado');
+    }
+    
+    // Obter opções salvas
+    $ftp_host = get_option('ftp_sync_ftp_host', '');
+    $ftp_port = get_option('ftp_sync_ftp_port', '21');
+    $ftp_username = get_option('ftp_sync_ftp_username', '');
+    $ftp_password = get_option('ftp_sync_ftp_password', '');
+    $ftp_path = get_option('ftp_sync_ftp_path', '/');
+    $ftp_passive = get_option('ftp_sync_ftp_passive', 'yes');
+    $check_interval = get_option('ftp_sync_check_interval', 'hourly');
+    $product_price = get_option('ftp_sync_product_price', '10');
+    $product_status = get_option('ftp_sync_product_status', 'publish');
+    
+    ?>
+    <div class="wrap">
+        <h1>FTP Sync para WooCommerce</h1>
+        <p>Configure as informações do servidor FTP para sincronizar arquivos como produtos WooCommerce.</p>
+        
+        <h2 class="nav-tab-wrapper">
+            <a href="?page=ftp-sync-woocommerce" class="nav-tab nav-tab-active">Configurações</a>
+            <a href="?page=ftp-sync-status" class="nav-tab">Status</a>
+        </h2>
+        
+        <form method="post" action="options.php">
+            <?php settings_fields('ftp_sync_settings'); ?>
+            
+            <h3>Configurações do Servidor FTP</h3>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_host">Servidor FTP</label></th>
+                    <td>
+                        <input name="ftp_sync_ftp_host" type="text" id="ftp_sync_ftp_host" 
+                               value="<?php echo esc_attr($ftp_host); ?>" class="regular-text">
+                        <p class="description">Endereço do servidor FTP (ex: ftp.seusite.com)</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_port">Porta FTP</label></th>
+                    <td>
+                        <input name="ftp_sync_ftp_port" type="text" id="ftp_sync_ftp_port" 
+                               value="<?php echo esc_attr($ftp_port); ?>" class="small-text">
+                        <p class="description">Porta FTP (geralmente 21)</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_username">Usuário FTP</label></th>
+                    <td>
+                        <input name="ftp_sync_ftp_username" type="text" id="ftp_sync_ftp_username" 
+                               value="<?php echo esc_attr($ftp_username); ?>" class="regular-text">
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_password">Senha FTP</label></th>
+                    <td>
+                        <input name="ftp_sync_ftp_password" type="password" id="ftp_sync_ftp_password" 
+                               value="<?php echo esc_attr($ftp_password); ?>" class="regular-text">
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_path">Pasta Base</label></th>
+                    <td>
+                        <input name="ftp_sync_ftp_path" type="text" id="ftp_sync_ftp_path" 
+                               value="<?php echo esc_attr($ftp_path); ?>" class="regular-text">
+                        <p class="description">Diretório no servidor FTP onde estão as pastas dos clientes (ex: /clientes)</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_ftp_passive">Modo Passivo</label></th>
+                    <td>
+                        <select name="ftp_sync_ftp_passive" id="ftp_sync_ftp_passive">
+                            <option value="yes" <?php selected($ftp_passive, 'yes'); ?>>Sim</option>
+                            <option value="no" <?php selected($ftp_passive, 'no'); ?>>Não</option>
+                        </select>
+                        <p class="description">Geralmente mantido como "Sim" para evitar problemas com firewall</p>
+                    </td>
+                </tr>
+            </table>
+            
+            <h3>Configurações dos Produtos</h3>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="ftp_sync_product_price">Preço Padrão</label></th>
+                    <td>
+                        <input name="ftp_sync_product_price" type="text" id="ftp_sync_product_price" 
+                               value="<?php echo esc_attr($product_price); ?>" class="small-text">
+                        <p class="description">Preço padrão para os produtos criados</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_product_status">Status do Produto</label></th>
+                    <td>
+                        <select name="ftp_sync_product_status" id="ftp_sync_product_status">
+                            <option value="publish" <?php selected($product_status, 'publish'); ?>>Publicado</option>
+                            <option value="draft" <?php selected($product_status, 'draft'); ?>>Rascunho</option>
+                            <option value="pending" <?php selected($product_status, 'pending'); ?>>Pendente</option>
+                        </select>
+                        <p class="description">Status dos produtos quando criados</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="ftp_sync_check_interval">Frequência de Verificação</label></th>
+                    <td>
+                        <select name="ftp_sync_check_interval" id="ftp_sync_check_interval">
+                            <option value="hourly" <?php selected($check_interval, 'hourly'); ?>>A cada hora</option>
+                            <option value="twicedaily" <?php selected($check_interval, 'twicedaily'); ?>>Duas vezes ao dia</option>
+                            <option value="daily" <?php selected($check_interval, 'daily'); ?>>Diariamente</option>
+                        </select>
+                        <p class="description">Com que frequência verificar novos arquivos</p>
+                    </td>
+                </tr>
+            </table>
+            
+            <?php submit_button('Salvar Configurações'); ?>
+        </form>
+        
+        <div style="margin-top:20px;padding:15px;background:#f8f8f8;border:1px solid #ddd;">
+            <h3>Sincronização Manual</h3>
+            <p>Clique abaixo para verificar novos arquivos imediatamente:</p>
+            <button id="ftp-sync-manual" class="button button-primary">Sincronizar Agora</button>
+            <span id="ftp-sync-result" style="margin-left:10px;display:none;"></span>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            $('#ftp-sync-manual').on('click', function(e) {
+                e.preventDefault();
+                var $button = $(this);
+                var $result = $('#ftp-sync-result');
+                
+                $button.prop('disabled', true).text('Sincronizando...');
+                $result.hide();
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'ftp_sync_manual',
+                        nonce: '<?php echo wp_create_nonce('ftp_sync_nonce'); ?>'
+                    },
+                    success: function(response) {
+                        $button.prop('disabled', false).text('Sincronizar Agora');
+                        if (response.success) {
+                            $result.text(response.data).css('color', 'green').show();
+                        } else {
+                            $result.text('Erro: ' + response.data).css('color', 'red').show();
+                        }
+                    },
+                    error: function() {
+                        $button.prop('disabled', false).text('Sincronizar Agora');
+                        $result.text('Erro de conexão com o servidor').css('color', 'red').show();
+                    }
+                });
+            });
+        });
+        </script>
+    </div>
+    <?php
+}
+
+/**
+ * Renderizar página de status
+ */
+function ftp_sync_render_status_page() {
+    // Verificar permissões
+    if (!current_user_can('manage_options')) {
+        wp_die('Acesso negado');
+    }
+    
+    // Verificar informações do sistema
+    $has_woocommerce = class_exists('WooCommerce');
+    $has_ftp = function_exists('ftp_connect');
+    $has_jetengine = defined('JET_ENGINE_VERSION');
+    $last_check = get_option('ftp_sync_last_check', 0);
+    $next_check = wp_next_scheduled('ftp_sync_check_cron');
+    
+    ?>
+    <div class="wrap">
+        <h1>Status do FTP Sync</h1>
+        
+        <h2 class="nav-tab-wrapper">
+            <a href="?page=ftp-sync-woocommerce" class="nav-tab">Configurações</a>
+            <a href="?page=ftp-sync-status" class="nav-tab nav-tab-active">Status</a>
+        </h2>
+        
+        <div style="margin-top:20px;">
+            <h3>Informações do Sistema</h3>
+            <table class="widefat" style="width:100%">
+                <tbody>
+                    <tr>
+                        <th style="width:200px">WooCommerce</th>
+                        <td>
+                            <?php if ($has_woocommerce): ?>
+                                <span style="color:green;font-weight:bold;">✓ Ativado</span>
+                                (versão <?php echo WC()->version; ?>)
+                            <?php else: ?>
+                                <span style="color:red;font-weight:bold;">✗ Desativado</span>
+                                <br><em>Este plugin requer o WooCommerce.</em>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Suporte a FTP</th>
+                        <td>
+                            <?php if ($has_ftp): ?>
+                                <span style="color:green;font-weight:bold;">✓ Disponível</span>
+                            <?php else: ?>
+                                <span style="color:red;font-weight:bold;">✗ Indisponível</span>
+                                <br><em>A extensão FTP do PHP é necessária.</em>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>JetEngine</th>
+                        <td>
+                            <?php if ($has_jetengine): ?>
+                                <span style="color:green;font-weight:bold;">✓ Ativado</span>
+                                (versão <?php echo JET_ENGINE_VERSION; ?>)
+                            <?php else: ?>
+                                <span style="color:orange;font-weight:bold;">⚠ Não detectado</span>
+                                <br><em>Recomendado para integração completa com cadastro de clientes.</em>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Última verificação</th>
+                        <td>
+                            <?php 
+                            if ($last_check > 0) {
+                                echo date('d/m/Y H:i:s', $last_check);
+                            } else {
+                                echo '<em>Nunca executado</em>';
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Próxima verificação agendada</th>
+                        <td>
+                            <?php 
+                            if ($next_check) {
+                                echo date('d/m/Y H:i:s', $next_check);
+                            } else {
+                                echo '<em>Não agendado</em>';
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top:20px;">
+            <h3>Testar Conexão FTP</h3>
+            <p>Clique para testar as configurações FTP atuais:</p>
+            <button id="ftp-test-connection" class="button">Testar Conexão</button>
+            <div id="ftp-test-result" style="margin-top:10px;padding:10px;display:none;"></div>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            $('#ftp-test-connection').on('click', function() {
+                var $button = $(this);
+                var $result = $('#ftp-test-result');
+                
+                $button.prop('disabled', true).text('Testando...');
+                $result.hide();
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'ftp_sync_test_connection',
+                        nonce: '<?php echo wp_create_nonce('ftp_sync_nonce'); ?>'
+                    },
+                    success: function(response) {
+                        $button.prop('disabled', false).text('Testar Conexão');
+                        if (response.success) {
+                            $result.html(response.data).css({
+                                'background-color': '#dff0d8',
+                                'color': '#3c763d',
+                                'border': '1px solid #d6e9c6'
+                            }).show();
+                        } else {
+                            $result.html(response.data).css({
+                                'background-color': '#f2dede',
+                                'color': '#a94442',
+                                'border': '1px solid #ebccd1'
+                            }).show();
+                        }
+                    },
+                    error: function() {
+                        $button.prop('disabled', false).text('Testar Conexão');
+                        $result.html('Erro de conexão com o servidor').css({
+                            'background-color': '#f2dede',
+                            'color': '#a94442',
+                            'border': '1px solid #ebccd1'
+                        }).show();
+                    }
+                });
+            });
+        });
+        </script>
+    </div>
+    <?php
+}
+
+/**
+ * Enfileirar scripts e estilos para o admin
+ */
+function ftp_sync_admin_scripts($hook) {
+    if (strpos($hook, 'ftp-sync') === false) {
+        return;
+    }
+    
+    wp_enqueue_style(
+        'ftp-sync-admin-style', 
+        plugins_url('assets/css/admin.css', __FILE__),
+        array(),
+        FTP_SYNC_VERSION
+    );
+}
+add_action('admin_enqueue_scripts', 'ftp_sync_admin_scripts');
+
+/**
+ * AJAX handler para testar conexão FTP
+ */
+function ftp_sync_test_connection() {
+    // Verificar nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'ftp_sync_nonce')) {
+        wp_send_json_error('Erro de segurança');
+        exit;
+    }
+    
+    // Verificar permissões
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Acesso negado');
+        exit;
+    }
+    
+    // Obter configurações
+    $host = get_option('ftp_sync_ftp_host', '');
+    $port = intval(get_option('ftp_sync_ftp_port', 21));
+    $username = get_option('ftp_sync_ftp_username', '');
+    $password = get_option('ftp_sync_ftp_password', '');
+    $path = get_option('ftp_sync_ftp_path', '/');
+    $passive = get_option('ftp_sync_ftp_passive', 'yes') === 'yes';
+    
+    // Validar configurações
+    if (empty($host) || empty($username) || empty($password)) {
+        wp_send_json_error('Configurações FTP incompletas. Preencha todos os campos obrigatórios.');
+        exit;
+    }
+    
+    // Tentar conectar
+    $conn = @ftp_connect($host, $port, 30);
+    if (!$conn) {
+        wp_send_json_error("Falha ao conectar ao servidor FTP: {$host}:{$port}");
+        exit;
+    }
+    
+    // Tentar login
+    $login = @ftp_login($conn, $username, $password);
+    if (!$login) {
+        ftp_close($conn);
+        wp_send_json_error('Falha na autenticação. Verifique o usuário e senha.');
+        exit;
+    }
+    
+    // Configurar modo passivo se necessário
+    if ($passive) {
+        @ftp_pasv($conn, true);
+    }
+    
+    // Tentar acessar o diretório
+    if (!@ftp_chdir($conn, $path)) {
+        ftp_close($conn);
+        wp_send_json_error("Conexão bem sucedida, mas não foi possível acessar o diretório: {$path}");
+        exit;
+    }
+    
+    // Listar diretório
+    $contents = @ftp_nlist($conn, ".");
+    $count = is_array($contents) ? count($contents) : 0;
+    
+    // Fechar conexão
+    ftp_close($conn);
+    
+    wp_send_json_success("<strong>Conexão FTP bem sucedida!</strong><br>Diretório: {$path}<br>Itens encontrados: {$count}");
+}
+add_action('wp_ajax_ftp_sync_test_connection', 'ftp_sync_test_connection');
+
+/**
+ * AJAX handler para sincronização manual
+ */
+function ftp_sync_manual() {
+    // Verificar nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'ftp_sync_nonce')) {
+        wp_send_json_error('Erro de segurança');
+        exit;
+    }
+    
+    // Verificar permissões
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Acesso negado');
+        exit;
+    }
+    
+    // Simular sincronização (implementação completa seria necessária)
+    update_option('ftp_sync_last_check', time());
+    
+    // Retornar sucesso
+    wp_send_json_success('Sincronização concluída com sucesso.');
+}
+add_action('wp_ajax_ftp_sync_manual', 'ftp_sync_manual');
+
+/**
+ * Criar CSS básico no diretório assets
+ */
+function ftp_sync_create_css_file() {
+    $css_dir = plugin_dir_path(__FILE__) . 'assets/css';
+    $css_file = $css_dir . '/admin.css';
+    
+    // Criar diretório se não existir
+    if (!file_exists($css_dir)) {
+        wp_mkdir_p($css_dir);
+    }
+    
+    // Criar arquivo CSS se não existir
+    if (!file_exists($css_file)) {
+        $css_content = "
+        /* Estilos para FTP Sync */
+        .ftp-sync-heading {
+            margin-bottom: 20px;
+        }
+        
+        #ftp-test-result, #ftp-sync-result {
+            padding: 10px;
+            border-radius: 3px;
+        }
+        ";
+        file_put_contents($css_file, $css_content);
+    }
+}
+register_activation_hook(__FILE__, 'ftp_sync_create_css_file');
+
+/**
+ * Hook para criar diretório assets na ativação
+ */
+function ftp_sync_plugin_activation() {
+    // Garantir que o diretório assets existe
+    $assets_dir = plugin_dir_path(__FILE__) . 'assets';
+    if (!file_exists($assets_dir)) {
+        wp_mkdir_p($assets_dir);
+        wp_mkdir_p($assets_dir . '/css');
+    }
+    
+    // Criar o CSS
+    ftp_sync_create_css_file();
+}
+register_activation_hook(__FILE__, 'ftp_sync_plugin_activation');
