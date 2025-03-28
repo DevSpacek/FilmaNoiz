@@ -487,7 +487,24 @@ function wftp_create_product($filename, $file_path, $user_id, $product_key) {
     
     $is_image = in_array(strtolower($file_extension), array('jpg', 'jpeg', 'png', 'gif', 'webp'));
     $is_downloadable = !$is_image;
-    
+
+    // Get the folder name from file path
+    $folder_name = basename(dirname($file_path));
+
+    // Create or get the category with the folder name
+    $category = get_term_by('name', $folder_name, 'product_cat');
+    if (!$category) {
+        // Create the category if it doesn't exist
+        $category_id = wp_insert_term($folder_name, 'product_cat');
+        if (is_wp_error($category_id)) {
+            wftp_add_log("Error creating category for folder: $folder_name");
+            return 'error';
+        }
+        $category_id = $category_id['term_id'];
+    } else {
+        $category_id = $category->term_id;
+    }
+
     // Create new product
     $product = new WC_Product();
     $product->set_name($product_name);
@@ -495,7 +512,8 @@ function wftp_create_product($filename, $file_path, $user_id, $product_key) {
     $product->set_catalog_visibility('visible');
     $product->set_price($default_price);
     $product->set_regular_price($default_price);
-    
+    $product->set_category_ids(array($category_id)); // Set the category ID
+
     // Set basic user metadata
     $product->update_meta_data('_wftp_product_key', $product_key);
     $product->update_meta_data('_wftp_user_id', $user_id);
