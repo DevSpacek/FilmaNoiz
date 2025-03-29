@@ -3,7 +3,7 @@
  * Plugin Name: WooCommerce FTP Folder Importer (Create Once)
  * Plugin URI: https://yourwebsite.com/
  * Description: Import products from FTP folders only once and never update them
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: DevSpace
  * Text Domain: woo-ftp-importer
  * Requires at least: 5.0
@@ -26,7 +26,7 @@ if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get
 }
 
 // Define constants
-define('WFTP_VERSION', '1.0.0');
+define('WFTP_VERSION', '1.0.1');
 define('WFTP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WFTP_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -68,6 +68,17 @@ function wftp_admin_page() {
         $remove_deleted_files = isset($_POST['wftp_remove_deleted_files']) ? 1 : 0;
         update_option('wftp_remove_deleted_files', $remove_deleted_files);
         
+        // Nova configuração para pasta de pré-visualização
+        $preview_folder_path = sanitize_text_field($_POST['wftp_preview_folder_path']);
+        update_option('wftp_preview_folder_path', $preview_folder_path);
+        
+        // Campo ACF para armazenar a pré-visualização
+        $acf_field_group = sanitize_text_field($_POST['wftp_acf_field_group']);
+        update_option('wftp_acf_field_group', $acf_field_group);
+        
+        $acf_preview_field = sanitize_text_field($_POST['wftp_acf_preview_field']);
+        update_option('wftp_acf_preview_field', $acf_preview_field);
+        
         echo '<div class="notice notice-success is-dismissible"><p>Settings saved successfully.</p></div>';
     }
     
@@ -78,6 +89,19 @@ function wftp_admin_page() {
         echo '<div class="notice notice-success is-dismissible"><p>Database reset successfully. All files will be treated as new in the next scan.</p></div>';
     }
     
+    // Clear scanning lock if requested
+    if (isset($_POST['wftp_clear_lock']) && wp_verify_nonce($_POST['wftp_reset_nonce'], 'wftp_reset_db')) {
+        delete_transient('wftp_scanning_lock');
+        wftp_add_log("Scanning lock was manually cleared by admin.");
+        echo '<div class="notice notice-success is-dismissible"><p>Scanning lock cleared successfully. You can now run a scan again.</p></div>';
+    }
+    
+    // Diagnose and fix ACF preview files
+    if (isset($_POST['wftp_fix_acf_previews']) && wp_verify_nonce($_POST['wftp_reset_nonce'], 'wftp_reset_db')) {
+        $fixed = wftp_diagnose_and_fix_acf_previews();
+        echo '<div class="notice notice-success is-dismissible"><p>ACF Preview diagnosis completed. ' . $fixed . ' product previews fixed/updated.</p></div>';
+    }
+    
     // Get current settings
     $base_folder_path = get_option('wftp_base_folder_path', ABSPATH . 'wp-content/uploads/user_folders');
     $scan_interval = get_option('wftp_scan_interval', 1);
@@ -85,6 +109,9 @@ function wftp_admin_page() {
     $product_status = get_option('wftp_product_status', 'draft');
     $log_enabled = get_option('wftp_log_enabled', 1);
     $remove_deleted_files = get_option('wftp_remove_deleted_files', 1);
+    $preview_folder_path = get_option('wftp_preview_folder_path', ABSPATH . 'wp-content/uploads/preview_files');
+    $acf_field_group = get_option('wftp_acf_field_group', 'product_details');
+    $acf_preview_field = get_option('wftp_acf_preview_field', 'preview_file');
     
     // Manual scan trigger
     if (isset($_POST['wftp_manual_scan']) && wp_verify_nonce($_POST['wftp_nonce'], 'wftp_manual_scan')) {
@@ -125,6 +152,42 @@ function wftp_admin_page() {
                             value="<?php echo esc_attr($base_folder_path); ?>" />
                         <p class="description">
                             Enter the absolute server path to the base folder containing user FTP folders
+                        </p>
+                    </td>
+                </tr>
+                <tr valign="top">
+                    <th scope="row">
+                        <label for="wftp_preview_folder_path">Preview Files Folder Path</label>
+                    </th>
+                    <td>
+                        <input type="text" id="wftp_preview_folder_path" name="wftp_preview_folder_path" class="regular-text" 
+                            value="<?php echo esc_attr($preview_folder_path); ?>" />
+                        <p class="description">
+                            Enter the absolute server path to the folder containing preview files (will be linked to ACF field)
+                        </p>
+                    </td>
+                </tr>
+                <tr valign="top">
+                    <th scope="row">
+                        <label for="wftp_acf_field_group">ACF Field Group Name</label>
+                    </th>
+                    <td>
+                        <input type="text" id="wftp_acf_field_group" name="wftp_acf_field_group" class="regular-text" 
+                            value="<?php echo esc_attr($acf_field_group); ?>" />
+                        <p class="description">
+                            Enter the ACF field group name that contains the preview file field
+                        </p>
+                    </td>
+                </tr>
+                <tr valign="top">
+                    <th scope="row">
+                        <label for="wftp_acf_preview_field">ACF Preview Field Name</label>
+                    </th>
+                    <td>
+                        <input type="text" id="wftp_acf_preview_field" name="wftp_acf_preview_field" class="regular-text" 
+                            value="<?php echo esc_attr($acf_preview_field); ?>" />
+                        <p class="description">
+                            Enter the ACF field name that will store preview files (must be a file field type)
                         </p>
                     </td>
                 </tr>
@@ -212,6 +275,14 @@ function wftp_admin_page() {
                 <?php wp_nonce_field('wftp_reset_db', 'wftp_reset_nonce'); ?>
                 <input type="submit" name="wftp_reset_db" class="button-secondary" value="Reset Database" 
                     onclick="return confirm('Are you sure? This will cause ALL files to be treated as new and potentially create duplicate products.');" />
+                
+                <input type="submit" name="wftp_clear_lock" class="button-secondary" value="Clear Scanning Lock" 
+                    style="background-color:#ffaa00;border-color:#ff8800;color:#fff;" 
+                    title="Use this if scans are not running and you see 'Scan already running' messages in the log" />
+                
+                <input type="submit" name="wftp_fix_acf_previews" class="button-secondary" value="Fix ACF Preview Files" 
+                    style="background-color:#0073aa;border-color:#005a87;color:#fff;" 
+                    title="Use this to diagnose and fix preview files that are not showing in the ACF interface" />
             </form>
         </div>
         
@@ -361,13 +432,24 @@ function wftp_count_user_products($user_id) {
 function wftp_scan_folders() {
     // Set a lock to prevent duplicate processing
     $lock_transient = 'wftp_scanning_lock';
+    
+    // Verificar se existe um bloqueio antigo (mais de 10 minutos)
+    $lock_time = get_transient('wftp_scanning_lock_time');
+    if ($lock_time && (time() - $lock_time > 600)) {
+        // Se o bloqueio é muito antigo, força a liberação
+        delete_transient($lock_transient);
+        delete_transient('wftp_scanning_lock_time');
+        wftp_add_log("Expired scanning lock detected and cleared (lock was older than 10 minutes)");
+    }
+    
     if (get_transient($lock_transient)) {
         wftp_add_log("Scan already running. Skipping this execution.");
         return;
     }
     
-    // Set lock for 5 minutes max
+    // Set lock for 5 minutes max and record the time
     set_transient($lock_transient, true, 5 * MINUTE_IN_SECONDS);
+    set_transient('wftp_scanning_lock_time', time(), 30 * MINUTE_IN_SECONDS);
     
     try {
         // Update last scan time
@@ -445,6 +527,13 @@ function wftp_scan_folders() {
             }
         }
         
+        // Depois de processar todos os produtos, processe os arquivos de pré-visualização
+        try {
+            wftp_process_preview_files();
+        } catch (Exception $e) {
+            wftp_add_log("Error during preview processing: " . $e->getMessage());
+        }
+        
         // Update processed files list
         update_option('wftp_processed_files', $processed_files);
         
@@ -460,10 +549,461 @@ function wftp_scan_folders() {
         wftp_add_log("Scan completed. Created: $total_created, Skipped: $total_skipped products");
     } catch (Exception $e) {
         wftp_add_log("Error during scan: " . $e->getMessage());
+    } finally {
+        // Sempre libera o bloqueio, mesmo em caso de erro
+        delete_transient($lock_transient);
+        delete_transient('wftp_scanning_lock_time');
+        wftp_add_log("Scanning lock released");
+    }
+}
+
+/**
+ * Process preview files and attach them to products via ACF fields
+ */
+function wftp_process_preview_files() {
+    $preview_folder = get_option('wftp_preview_folder_path', ABSPATH . 'wp-content/uploads/preview_files');
+    $acf_field_group = get_option('wftp_acf_field_group', 'product_details');
+    $acf_field_name = get_option('wftp_acf_preview_field', 'preview_file');
+    
+    // Verificar se ACF está ativo
+    if (!function_exists('update_field')) {
+        wftp_add_log("Advanced Custom Fields não está ativo. Não foi possível processar arquivos de pré-visualização.");
+        return;
     }
     
-    // Release the lock
-    delete_transient($lock_transient);
+    // Verificar se o campo ACF existe antes de iniciar o processamento
+    $field_exists = wftp_verify_acf_field($acf_field_group, $acf_field_name);
+    if (!$field_exists) {
+        return;
+    }
+    
+    // Get folder to user mappings (reutilizando a mesma estrutura de pastas)
+    $folder_mappings = wftp_get_folder_user_mappings();
+    $preview_counts = ['processed' => 0, 'skipped' => 0, 'attached' => 0];
+    
+    // Processar cada pasta de usuário
+    foreach ($folder_mappings as $folder_name => $user_id) {
+        $user_preview_path = $preview_folder . '/' . $folder_name;
+        
+        // Verificar se existe pasta de pré-visualização para este usuário
+        if (!is_dir($user_preview_path)) {
+            continue;
+        }
+        
+        wftp_add_log("Escaneando pasta de pré-visualização para usuário #{$user_id}: $folder_name");
+        
+        // Obter todos os arquivos de pré-visualização
+        $preview_files = glob($user_preview_path . '/*');
+        
+        foreach ($preview_files as $preview_file) {
+            if (is_dir($preview_file)) {
+                continue; // Pular subpastas
+            }
+            
+            $filename = basename($preview_file);
+            $basename = pathinfo($filename, PATHINFO_FILENAME); // Nome sem extensão
+            
+            $preview_counts['processed']++;
+            
+            // Encontrar o produto correspondente
+            $product = wftp_find_product_by_filename($basename, $user_id);
+            
+            if (!$product) {
+                wftp_add_log("Nenhum produto encontrado para o arquivo de pré-visualização: $filename (usuário: $user_id)");
+                $preview_counts['skipped']++;
+                continue;
+            }
+            
+            // Anexar o arquivo ao campo ACF
+            $result = wftp_attach_preview_to_acf($product, $preview_file, $acf_field_name);
+            
+            if ($result) {
+                $preview_counts['attached']++;
+                wftp_add_log("Anexado arquivo de pré-visualização ao produto '{$product->get_name()}': $filename");
+            } else {
+                $preview_counts['skipped']++;
+                wftp_add_log("Falha ao anexar arquivo de pré-visualização ao produto '{$product->get_name()}': $filename");
+            }
+        }
+    }
+    
+    wftp_add_log("Processamento de pré-visualização concluído. Processados: {$preview_counts['processed']}, " . 
+                 "Anexados: {$preview_counts['attached']}, Ignorados: {$preview_counts['skipped']}");
+}
+
+/**
+ * Find a product by the source filename
+ */
+function wftp_find_product_by_filename($basename, $user_id) {
+    // Busca por correspondência exata no nome do arquivo
+    $products = wc_get_products([
+        'limit' => 1,
+        'status' => ['publish', 'draft', 'pending', 'private'],
+        'meta_key' => '_wftp_user_id',
+        'meta_value' => $user_id,
+    ]);
+    
+    // Verificar se algum produto corresponde ao basename
+    foreach ($products as $product) {
+        $source_file = $product->get_meta('_wftp_source_file');
+        $source_basename = pathinfo($source_file, PATHINFO_FILENAME);
+        
+        if ($source_basename === $basename) {
+            return $product;
+        }
+    }
+    
+    // Se não encontrou por correspondência exata, tenta pelo nome do produto
+    $products = wc_get_products([
+        'limit' => -1,
+        'status' => ['publish', 'draft', 'pending', 'private'],
+        'meta_key' => '_wftp_user_id',
+        'meta_value' => $user_id,
+    ]);
+    
+    foreach ($products as $product) {
+        // Remove espaços, traços e sublinhados para comparação mais flexível
+        $product_name = str_replace([' ', '-', '_'], '', strtolower($product->get_name()));
+        $search_basename = str_replace([' ', '-', '_'], '', strtolower($basename));
+        
+        if ($product_name === $search_basename) {
+            return $product;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Attach a preview file to a product using ACF
+ */
+function wftp_attach_preview_to_acf($product, $preview_file, $acf_field_name) {
+    if (!function_exists('update_field') || !function_exists('get_field')) {
+        wftp_add_log("ACF functions not available. Skipping preview attachment.");
+        return false;
+    }
+    
+    // Obter ID do produto
+    $product_id = $product->get_id();
+    
+    // Obter o nome do grupo de campos ACF
+    $acf_field_group = get_option('wftp_acf_field_group', 'product_details');
+    
+    try {
+        // Upload do arquivo para a biblioteca de mídia do WordPress
+        $file_info = wp_upload_bits(basename($preview_file), null, file_get_contents($preview_file));
+        
+        if (!$file_info['error']) {
+            $file_path = $file_info['file'];
+            $file_type = wp_check_filetype(basename($file_path), null);
+            
+            $attachment_data = [
+                'post_mime_type' => $file_type['type'],
+                'post_title' => sanitize_file_name(basename($file_path)),
+                'post_content' => '',
+                'post_status' => 'inherit'
+            ];
+            
+            $attach_id = wp_insert_attachment($attachment_data, $file_path, $product_id);
+            
+            if ($attach_id) {
+                // Gerar metadados para o anexo e atualizar o banco de dados
+                require_once(ABSPATH . 'wp-admin/includes/image.php');
+                $attach_data = wp_generate_attachment_metadata($attach_id, $file_path);
+                wp_update_attachment_metadata($attach_id, $attach_data);
+                
+                // MÉTODO CORRIGIDO: Abordagem direta para atualização do campo ACF
+                // Dependendo da versão do ACF e de como o campo está configurado, 
+                // diferentes abordagens podem ser necessárias
+                
+                // 1. Identificar o campo ACF exato
+                if (!empty($acf_field_group)) {
+                    // Se estamos usando um grupo, precisamos encontrar o campo correto
+                    $field_key = wftp_get_acf_field_key($acf_field_name, $acf_field_group);
+                    if ($field_key) {
+                        // Atualizar usando o field key (mais confiável)
+                        update_field($field_key, $attach_id, $product_id);
+                        wftp_add_log("Campo ACF atualizado via field key: $field_key para produto #{$product_id}");
+                    } else {
+                        // Tentar atualizar diretamente pelo nome do campo dentro do grupo
+                        wftp_add_log("Tentando atualizar campo ACF diretamente pelo nome: $acf_field_name");
+                        
+                        // Recuperar o valor atual do grupo
+                        if (have_rows($acf_field_group, $product_id)) {
+                            while (have_rows($acf_field_group, $product_id)) {
+                                the_row();
+                                // Atualizar apenas o campo dentro do grupo
+                                update_sub_field($acf_field_name, $attach_id);
+                                wftp_add_log("Campo atualizado via update_sub_field()");
+                            }
+                        } else {
+                            // Se o grupo ainda não existe, crie-o com o campo
+                            $group_value = array(
+                                $acf_field_name => $attach_id
+                            );
+                            update_field($acf_field_group, $group_value, $product_id);
+                            wftp_add_log("Novo grupo criado com o campo de pré-visualização");
+                        }
+                    }
+                } else {
+                    // Campo direto (sem grupo)
+                    $field_key = wftp_get_acf_field_key($acf_field_name);
+                    if ($field_key) {
+                        update_field($field_key, $attach_id, $product_id);
+                        wftp_add_log("Campo ACF atualizado via field key: $field_key");
+                    } else {
+                        update_field($acf_field_name, $attach_id, $product_id);
+                        wftp_add_log("Campo ACF atualizado pelo nome: $acf_field_name");
+                    }
+                }
+                
+                // Como backup, também atualiza diretamente no post meta
+                update_post_meta($product_id, $acf_field_name, $attach_id);
+                
+                // Registra o ID no campo específico para diagnóstico
+                update_post_meta($product_id, '_wftp_preview_attachment_id', $attach_id);
+                
+                // Tenta forçar a atualização do cache do ACF
+                if (function_exists('acf_flush_value_cache')) {
+                    acf_flush_value_cache($product_id);
+                }
+                
+                return true;
+            }
+        }
+    } catch (Exception $e) {
+        wftp_add_log("Erro ao anexar arquivo de pré-visualização: " . $e->getMessage());
+    }
+    
+    return false;
+}
+
+/**
+ * Obtém a chave do campo ACF a partir do nome
+ */
+function wftp_get_acf_field_key($field_name, $group_name = '') {
+    if (!function_exists('acf_get_field_groups') || !function_exists('acf_get_fields')) {
+        return false;
+    }
+    
+    // Se temos um nome de grupo, pesquisar apenas nesse grupo
+    if (!empty($group_name)) {
+        $field_groups = acf_get_field_groups(array('title' => $group_name));
+        if (empty($field_groups)) {
+            // Pesquisa menos restritiva
+            $field_groups = acf_get_field_groups();
+            $normalized_group_name = strtolower(str_replace(['_', ' '], '', $group_name));
+            
+            foreach ($field_groups as $index => $group) {
+                $normalized_title = strtolower(str_replace(['_', ' '], '', $group['title']));
+                if ($normalized_title !== $normalized_group_name) {
+                    unset($field_groups[$index]);
+                }
+            }
+        }
+    } else {
+        // Pesquisar em todos os grupos
+        $field_groups = acf_get_field_groups();
+    }
+    
+    foreach ($field_groups as $group) {
+        $fields = acf_get_fields($group);
+        if (!$fields) continue;
+        
+        foreach ($fields as $field) {
+            // Comparação exata ou normalizada
+            if ($field['name'] === $field_name) {
+                return $field['key'];
+            }
+            
+            // Comparação menos restritiva
+            $normalized_field_name = strtolower(str_replace(['_', ' '], '', $field_name));
+            $normalized_name = strtolower(str_replace(['_', ' '], '', $field['name']));
+            
+            if ($normalized_name === $normalized_field_name) {
+                return $field['key'];
+            }
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Verifica e valida a existência dos campos ACF antes do processamento
+ */
+function wftp_verify_acf_field($group_name, $field_name) {
+    if (!function_exists('acf_get_field_groups')) {
+        wftp_add_log("As funções avançadas do ACF não estão disponíveis. Usando modo de compatibilidade.");
+        return true;
+    }
+    
+    // Verificar se o campo existe usando funções nativas do ACF
+    $field_exists = wftp_acf_field_exists($group_name, $field_name);
+    
+    if (!$field_exists) {
+        // Tentar obter todos os grupos de campo para debug
+        $all_groups = acf_get_field_groups();
+        $group_names = [];
+        foreach ($all_groups as $group) {
+            $group_names[] = $group['title'] . ' (key: ' . $group['key'] . ')';
+        }
+        
+        wftp_add_log("ERRO: O campo ACF '$field_name' no grupo '$group_name' não existe. Verifique sua configuração no ACF.");
+        wftp_add_log("Grupos ACF disponíveis: " . implode(', ', $group_names));
+        
+        // Tentar obter campos do primeiro grupo para ajudar no debug
+        if (!empty($all_groups)) {
+            $first_group = $all_groups[0];
+            $fields = acf_get_fields($first_group);
+            $field_names = [];
+            foreach ($fields as $field) {
+                $field_names[] = $field['name'] . ' (label: ' . $field['label'] . ')';
+            }
+            wftp_add_log("Campos no grupo '{$first_group['title']}': " . implode(', ', $field_names));
+        }
+        
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * Verifica se um campo ACF existe dentro de um grupo de campos
+ * Versão melhorada com busca mais flexível
+ */
+function wftp_acf_field_exists($group_name, $field_name) {
+    if (!function_exists('acf_get_field_groups')) {
+        // Se a função ACF não estiver disponível, presuma que está correto
+        return true;
+    }
+    
+    // Primeiro, tentar busca exata pelo título
+    $field_groups = acf_get_field_groups(array('title' => $group_name));
+    
+    // Se não encontrar pelo título exato, tenta uma busca menos restritiva
+    if (empty($field_groups)) {
+        $all_groups = acf_get_field_groups();
+        foreach ($all_groups as $group) {
+            // Compara de forma case insensitive e removendo espaços/underscores
+            $normalized_group_name = strtolower(str_replace(['_', ' '], '', $group_name));
+            $normalized_title = strtolower(str_replace(['_', ' '], '', $group['title']));
+            
+            if ($normalized_group_name == $normalized_title) {
+                $field_groups = [$group];
+                break;
+            }
+        }
+    }
+    
+    if (empty($field_groups)) {
+        return false;
+    }
+    
+    // Verificar em todos os grupos encontrados
+    foreach ($field_groups as $group) {
+        $fields = acf_get_fields($group);
+        if (!$fields) continue;
+        
+        foreach ($fields as $field) {
+            // Busca pelo nome exato
+            if ($field['name'] == $field_name) {
+                return true;
+            }
+            
+            // Busca mais flexível (case insensitive/remover underscores)
+            $normalized_field_name = strtolower(str_replace(['_', ' '], '', $field_name));
+            $normalized_name = strtolower(str_replace(['_', ' '], '', $field['name']));
+            
+            if ($normalized_field_name == $normalized_name) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Diagnóstico e correção de arquivos de pré-visualização
+ */
+function wftp_diagnose_and_fix_acf_previews() {
+    global $wpdb;
+    wftp_add_log("Iniciando diagnóstico e correção dos campos ACF de pré-visualização...");
+    
+    $acf_field_group = get_option('wftp_acf_field_group', 'product_details');
+    $acf_field_name = get_option('wftp_acf_preview_field', 'preview_file');
+    
+    // Buscar todos os produtos que têm um ID de anexo de pré-visualização armazenado
+    $products_with_previews = $wpdb->get_results(
+        "SELECT post_id, meta_value 
+         FROM {$wpdb->postmeta} 
+         WHERE meta_key = '_wftp_preview_attachment_id'"
+    );
+    
+    $fixed_count = 0;
+    
+    if (empty($products_with_previews)) {
+        wftp_add_log("Nenhum produto com pré-visualização encontrado para diagnóstico.");
+        return $fixed_count;
+    }
+    
+    wftp_add_log("Encontrados " . count($products_with_previews) . " produtos com pré-visualizações para diagnóstico.");
+    
+    // Tente obter a chave de campo ACF
+    $field_key = wftp_get_acf_field_key($acf_field_name, $acf_field_group);
+    
+    foreach ($products_with_previews as $item) {
+        $product_id = $item->post_id;
+        $attachment_id = $item->meta_value;
+        
+        // Verificar se o anexo existe
+        if (!wp_get_attachment_url($attachment_id)) {
+            wftp_add_log("Produto #{$product_id}: Anexo #{$attachment_id} não existe mais. Pulando.");
+            continue;
+        }
+        
+        // MÉTODO 1: Verificar/corrigir usando field key se disponível
+        if ($field_key) {
+            update_field($field_key, $attachment_id, $product_id);
+            wftp_add_log("Produto #{$product_id}: Campo atualizado via field_key '{$field_key}' com anexo #{$attachment_id}");
+            $fixed_count++;
+            continue;
+        }
+        
+        // MÉTODO 2: Verificar/corrigir usando update_field diretamente
+        $current_value = get_field($acf_field_name, $product_id);
+        if (!$current_value || $current_value != $attachment_id) {
+            update_field($acf_field_name, $attachment_id, $product_id);
+            wftp_add_log("Produto #{$product_id}: Campo atualizado via update_field com anexo #{$attachment_id}");
+            $fixed_count++;
+            continue;
+        }
+        
+        // MÉTODO 3: Verificar/corrigir caso esteja em um grupo
+        if (!empty($acf_field_group)) {
+            $group_value = get_field($acf_field_group, $product_id, true);
+            
+            if (is_array($group_value)) {
+                $group_value[$acf_field_name] = $attachment_id;
+                update_field($acf_field_group, $group_value, $product_id);
+                wftp_add_log("Produto #{$product_id}: Campo atualizado via grupo '{$acf_field_group}' com anexo #{$attachment_id}");
+                $fixed_count++;
+                continue;
+            }
+        }
+        
+        // MÉTODO 4: Verificar/corrigir usando post meta diretamente
+        $meta_field = "_{$acf_field_name}";
+        update_post_meta($product_id, $meta_field, $attachment_id);
+        update_post_meta($product_id, $acf_field_name, $attachment_id);
+        wftp_add_log("Produto #{$product_id}: Campo atualizado via post_meta com anexo #{$attachment_id}");
+        $fixed_count++;
+    }
+    
+    wftp_add_log("Diagnóstico concluído. Campos corrigidos/atualizados: {$fixed_count}");
+    return $fixed_count;
 }
 
 /**

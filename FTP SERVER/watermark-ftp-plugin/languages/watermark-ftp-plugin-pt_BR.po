@@ -1,0 +1,44 @@
+msgid "Plugin Name"
+msgstr "Nome do Plugin"
+
+msgid "Watermark FTP Plugin"
+msgstr "Plugin de Marca D'Água FTP"
+
+msgid "Description"
+msgstr "Este plugin adiciona uma marca d'água a arquivos de imagem armazenados em um servidor FTP."
+
+msgid "Settings"
+msgstr "Configurações"
+
+msgid "FTP Host"
+msgstr "Host FTP"
+
+msgid "FTP Username"
+msgstr "Nome de Usuário FTP"
+
+msgid "FTP Password"
+msgstr "Senha FTP"
+
+msgid "Source Directory"
+msgstr "Diretório de Origem"
+
+msgid "Destination Directory"
+msgstr "Diretório de Destino"
+
+msgid "Watermark Text"
+msgstr "Texto da Marca D'Água"
+
+msgid "Upload"
+msgstr "Enviar"
+
+msgid "Success"
+msgstr "Sucesso"
+
+msgid "Error"
+msgstr "Erro"
+
+msgid "Watermark added successfully."
+msgstr "Marca d'água adicionada com sucesso."
+
+msgid "Failed to add watermark."
+msgstr "Falha ao adicionar a marca d'água."

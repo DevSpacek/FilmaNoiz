@@ -1,0 +1,1 @@
+// Este arquivo contém o código JavaScript para a interface administrativa do plugin, incluindo interações e validações.

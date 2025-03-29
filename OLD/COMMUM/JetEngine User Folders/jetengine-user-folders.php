@@ -33,6 +33,12 @@ class JetEngine_User_Folders {
             $uploads_dir = wp_upload_dir();
             update_option('juf_base_directory', $uploads_dir['basedir'] . '/user_folders');
         }
+        
+        // Configuração padrão para o segundo diretório base se não existir
+        if (!get_option('juf_second_base_directory')) {
+            $uploads_dir = wp_upload_dir();
+            update_option('juf_second_base_directory', $uploads_dir['basedir'] . '/user_folders_backup');
+        }
     }
     
     /**
@@ -40,6 +46,7 @@ class JetEngine_User_Folders {
      */
     public function register_settings() {
         register_setting('jetengine_user_folders', 'juf_base_directory');
+        register_setting('jetengine_user_folders', 'juf_second_base_directory');
         register_setting('jetengine_user_folders', 'juf_selected_roles');
         register_setting('jetengine_user_folders', 'juf_folder_structure');
         register_setting('jetengine_user_folders', 'juf_folder_naming');
@@ -68,6 +75,7 @@ class JetEngine_User_Folders {
         
         // Obter configurações atuais
         $base_directory = get_option('juf_base_directory');
+        $second_base_directory = get_option('juf_second_base_directory');
         $selected_roles = get_option('juf_selected_roles', array());
         $folder_structure = get_option('juf_folder_structure', "imports\nimagens\ndocumentos");
         $folder_naming = get_option('juf_folder_naming', 'username');
@@ -82,8 +90,10 @@ class JetEngine_User_Folders {
             $user_id = isset($_POST['test_user_id']) ? intval($_POST['test_user_id']) : 0;
             if ($user_id > 0) {
                 $result = $this->create_user_folders($user_id);
-                if ($result) {
+                if ($result === true) {
                     $test_message = '<div class="notice notice-success"><p>Pastas criadas com sucesso!</p></div>';
+                } elseif (is_array($result)) {
+                    $test_message = '<div class="notice notice-warning"><p>Resultado da criação: ' . esc_html(implode(', ', $result)) . '</p></div>';
                 } else {
                     $test_message = '<div class="notice notice-error"><p>Falha na criação de pastas ou usuário não tem papel compatível.</p></div>';
                 }
@@ -101,7 +111,7 @@ class JetEngine_User_Folders {
                 
                 <table class="form-table">
                     <tr>
-                        <th scope="row">Diretório Base</th>
+                        <th scope="row">Diretório Base Principal</th>
                         <td>
                             <input type="text" name="juf_base_directory" value="<?php echo esc_attr($base_directory); ?>" class="regular-text" />
                             <p class="description">Caminho absoluto para o diretório base onde serão criadas as pastas de usuários.</p>
@@ -109,6 +119,24 @@ class JetEngine_User_Folders {
                             <?php 
                             if (!empty($base_directory)) {
                                 if (file_exists($base_directory)) {
+                                    echo '<p style="color: green;">✓ Diretório existe e é acessível.</p>';
+                                } else {
+                                    echo '<p style="color: orange;">⚠ Diretório não existe. Será criado automaticamente quando necessário.</p>';
+                                }
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">Diretório Base Secundário</th>
+                        <td>
+                            <input type="text" name="juf_second_base_directory" value="<?php echo esc_attr($second_base_directory); ?>" class="regular-text" />
+                            <p class="description">Caminho absoluto para o segundo diretório onde serão criadas cópias das pastas de usuários.</p>
+                            
+                            <?php 
+                            if (!empty($second_base_directory)) {
+                                if (file_exists($second_base_directory)) {
                                     echo '<p style="color: green;">✓ Diretório existe e é acessível.</p>';
                                 } else {
                                     echo '<p style="color: orange;">⚠ Diretório não existe. Será criado automaticamente quando necessário.</p>';
@@ -258,7 +286,12 @@ class JetEngine_User_Folders {
         
         $user = get_userdata($user_id);
         $base_directory = get_option('juf_base_directory');
+        $second_base_directory = get_option('juf_second_base_directory');
         $folder_naming = get_option('juf_folder_naming', 'username');
+        
+        // Log para depuração
+        error_log("JUF - Base Directory: " . $base_directory);
+        error_log("JUF - Second Base Directory: " . $second_base_directory);
         
         // Determinar nome da pasta principal
         switch ($folder_naming) {
@@ -277,9 +310,46 @@ class JetEngine_User_Folders {
                 $folder_name = sanitize_file_name($user->user_login);
         }
         
+        $results = array();
+        
+        // Criar estruturas de pasta em ambas localizações
+        $primary_result = $this->create_folder_structure($base_directory, $folder_name, $user_id);
+        $results[] = "Primário: " . ($primary_result ? "OK" : "Falha");
+        
+        // Criar a mesma estrutura no segundo diretório
+        if (!empty($second_base_directory)) {
+            $secondary_result = $this->create_folder_structure($second_base_directory, $folder_name, $user_id);
+            $results[] = "Secundário: " . ($secondary_result ? "OK" : "Falha");
+        } else {
+            $results[] = "Secundário: Diretório não configurado";
+        }
+        
+        return $results;
+    }
+    
+    /**
+     * Criar estrutura de pastas em um diretório base específico
+     */
+    private function create_folder_structure($base_directory, $folder_name, $user_id) {
+        // Verificar se o diretório base está vazio
+        if (empty($base_directory)) {
+            error_log("JUF - Diretório base vazio");
+            return false;
+        }
+        
         // Criar diretório base se não existir
         if (!file_exists($base_directory)) {
-            wp_mkdir_p($base_directory);
+            $result = wp_mkdir_p($base_directory);
+            if (!$result) {
+                error_log("JUF - Não foi possível criar diretório base: " . $base_directory);
+                return false;
+            }
+        }
+        
+        // Verificar se o diretório base é gravável
+        if (!is_writable($base_directory)) {
+            error_log("JUF - Diretório base não é gravável: " . $base_directory);
+            return false;
         }
         
         // Caminho para pasta do usuário
@@ -287,7 +357,11 @@ class JetEngine_User_Folders {
         
         // Criar pasta do usuário
         if (!file_exists($user_folder)) {
-            wp_mkdir_p($user_folder);
+            $result = wp_mkdir_p($user_folder);
+            if (!$result) {
+                error_log("JUF - Não foi possível criar pasta do usuário: " . $user_folder);
+                return false;
+            }
         }
         
         // Criar subpastas
@@ -299,7 +373,10 @@ class JetEngine_User_Folders {
             if (!empty($subfolder)) {
                 $subfolder_path = trailingslashit($user_folder) . sanitize_file_name($subfolder);
                 if (!file_exists($subfolder_path)) {
-                    wp_mkdir_p($subfolder_path);
+                    $result = wp_mkdir_p($subfolder_path);
+                    if (!$result) {
+                        error_log("JUF - Não foi possível criar subpasta: " . $subfolder_path);
+                    }
                 }
             }
         }
@@ -307,7 +384,13 @@ class JetEngine_User_Folders {
         // Salvar o caminho da pasta no meta do usuário
         update_user_meta($user_id, 'user_folder_path', $folder_name);
         
-        return true;
+        // Verificar se as pastas foram realmente criadas
+        if (file_exists($user_folder)) {
+            return true;
+        } else {
+            error_log("JUF - Pastas não foram criadas: " . $user_folder);
+            return false;
+        }
     }
 }
 
@@ -315,12 +398,17 @@ class JetEngine_User_Folders {
 $jetengine_user_folders = new JetEngine_User_Folders();
 
 // Função auxiliar para outros plugins/temas
-function juf_get_user_folder($user_id) {
+function juf_get_user_folder($user_id, $second_location = false) {
     $folder_name = get_user_meta($user_id, 'user_folder_path', true);
     if (empty($folder_name)) {
         return false;
     }
     
-    $base_directory = get_option('juf_base_directory');
+    if ($second_location) {
+        $base_directory = get_option('juf_second_base_directory');
+    } else {
+        $base_directory = get_option('juf_base_directory');
+    }
+    
     return trailingslashit($base_directory) . $folder_name;
 }
