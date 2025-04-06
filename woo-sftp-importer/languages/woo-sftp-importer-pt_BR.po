@@ -1,0 +1,44 @@
+msgid "SFTP Importer"
+msgstr "Importador SFTP"
+
+msgid "Connect to SFTP Server"
+msgstr "Conectar ao Servidor SFTP"
+
+msgid "File Upload Successful"
+msgstr "Upload de Arquivo Bem-Sucedido"
+
+msgid "File Upload Failed"
+msgstr "Falha no Upload do Arquivo"
+
+msgid "No files found in the specified directory."
+msgstr "Nenhum arquivo encontrado no diretório especificado."
+
+msgid "Error connecting to SFTP server."
+msgstr "Erro ao conectar ao servidor SFTP."
+
+msgid "Settings saved successfully."
+msgstr "Configurações salvas com sucesso."
+
+msgid "Invalid SFTP credentials."
+msgstr "Credenciais SFTP inválidas."
+
+msgid "Select Files"
+msgstr "Selecionar Arquivos"
+
+msgid "Import Products"
+msgstr "Importar Produtos"
+
+msgid "Product Import Completed"
+msgstr "Importação de Produtos Concluída"
+
+msgid "Product Import Failed"
+msgstr "Falha na Importação de Produtos"
+
+msgid "Please check your SFTP settings."
+msgstr "Por favor, verifique suas configurações SFTP."
+
+msgid "SFTP Connection Established"
+msgstr "Conexão SFTP Estabelecida"
+
+msgid "SFTP Connection Closed"
+msgstr "Conexão SFTP Fechada"

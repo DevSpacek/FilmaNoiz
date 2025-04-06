@@ -1,0 +1,60 @@
+/* 
+ * Admin styles for the Woo SFTP Importer plugin
+ */
+
+/* General styles for the admin interface */
+.wrap {
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 5px;
+}
+
+/* Header styles */
+h1, h2, h3 {
+    color: #333;
+}
+
+/* Button styles */
+.button-primary {
+    background-color: #0073aa;
+    border-color: #0073aa;
+    color: #fff;
+}
+
+.button-primary:hover {
+    background-color: #005177;
+    border-color: #005177;
+}
+
+/* Table styles */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th, .table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+}
+
+.table th {
+    background-color: #f1f1f1;
+    text-align: left;
+}
+
+/* Form styles */
+.form-field {
+    margin-bottom: 15px;
+}
+
+.form-field label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.form-field input, .form-field select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}

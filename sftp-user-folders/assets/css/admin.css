@@ -1,0 +1,70 @@
+/* 
+ * This file contains the CSS styles for the admin settings page of the SFTP User Folders plugin.
+ */
+
+/* Basic styling for the admin page */
+.wrap {
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 5px;
+}
+
+/* Header styles */
+.wrap h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+}
+
+/* Form table styles */
+.form-table th {
+    width: 200px;
+    text-align: left;
+}
+
+/* Input field styles */
+input[type="text"],
+textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+/* Button styles */
+button.button {
+    background-color: #0073aa;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button.button:hover {
+    background-color: #005177;
+}
+
+/* Notice styles */
+.notice {
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.notice-success {
+    background-color: #dff0d8;
+    border-color: #d6e9c6;
+    color: #3c763d;
+}
+
+.notice-warning {
+    background-color: #fcf8e3;
+    border-color: #faebcc;
+    color: #8a6d3b;
+}
+
+.notice-error {
+    background-color: #f2dede;
+    border-color: #ebccd1;
+    color: #a94442;
+}
