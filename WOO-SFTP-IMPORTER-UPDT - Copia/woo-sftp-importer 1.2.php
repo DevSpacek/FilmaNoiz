@@ -1273,19 +1273,6 @@ function wsftp_attach_preview_to_acf($product_id, $file_path, $acf_field_name)
         // Get ACF field group name
         $acf_field_group = get_option('wsftp_acf_field_group', 'product_details');
 
-        // Extrair o nome do arquivo para uso com o filtro
-        $file_name = basename($file_path);
-
-        // Aplicar filtro para permitir que outros plugins processem o arquivo antes de anexá-lo
-        // Isso permite que o plugin de watermark processe o arquivo quando necessário
-        $processed_file_path = apply_filters('wsftp_before_preview_attach', $file_path, $product_id, $file_name);
-
-        // Se o caminho do arquivo foi alterado, usar o novo caminho
-        if ($processed_file_path && $processed_file_path !== $file_path) {
-            $file_path = $processed_file_path;
-            wsftp_add_log("Arquivo processado por filtro para product #$product_id: " . basename($file_path));
-        }
-
         // Check if we already have an attachment for this product
         $attachment_id = 0;
         $file_type = wp_check_filetype(basename($file_path), null);
@@ -1300,11 +1287,6 @@ function wsftp_attach_preview_to_acf($product_id, $file_path, $acf_field_name)
             if (!empty($file_attachment_id)) {
                 $attachment_id = $file_attachment_id;
             }
-        }
-
-        // Se usamos um arquivo processado, não devemos reutilizar o attachment original
-        if ($processed_file_path && $processed_file_path !== $file_path) {
-            $attachment_id = 0;
         }
 
         // If we don't have an attachment, create one
